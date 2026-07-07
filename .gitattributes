@@ -1,0 +1,12 @@
+# Set default behavior to automatic text line ending normalization
+* text=auto
+
+# Enforce CRLF on Windows batch files and PowerShell scripts
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Normalize documentation and configuration files to LF
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.py text eol=lf

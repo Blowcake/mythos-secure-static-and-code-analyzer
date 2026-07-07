@@ -1,0 +1,109 @@
+name: Repository hygiene
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate public repository shape
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $failed = $false
+          Get-ChildItem -Recurse -File -Filter "*.ps1" | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Error "$($_.FullName): $($errors[0].Message)"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Validate repository hygiene
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $requiredFiles = @(
+            "README.md",
+            "LICENSE",
+            "CHANGELOG.md",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "GOVERNANCE.md",
+            "project.json",
+            "Doxyfile",
+            "build.ps1",
+            "backup.ps1",
+            "bump.ps1"
+          )
+
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Required public file missing: $file"
+            }
+          }
+
+          $requiredDirs = @(
+            ".github/ISSUE_TEMPLATE",
+            "src/autoit_static_analyzer",
+            "tests",
+            "tools"
+          )
+
+          foreach ($dir in $requiredDirs) {
+            if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+              throw "Required public directory missing: $dir"
+            }
+          }
+
+          $forbiddenPathPatterns = @(
+            '(^|[\\/])docs_internal([\\/]|$)',
+            '(^|[\\/])scratch([\\/]|$)',
+            '(^|[\\/])\.agents([\\/]|$)',
+            '(^|[\\/])\.tmp([\\/]|$)',
+            '(^|[\\/])docs[\\/]doxygen([\\/]|$)',
+            '_safetybackup',
+            '(^|[\\/])task\.md$',
+            '(^|[\\/])walkthrough\.md$',
+            '(^|[\\/])implementation_plan\.md$'
+          )
+
+          $violations = @()
+          Get-ChildItem -Recurse -Force -File | ForEach-Object {
+            $relative = Resolve-Path -LiteralPath $_.FullName -Relative
+            foreach ($pattern in $forbiddenPathPatterns) {
+              if ($relative -match $pattern) {
+                $violations += $relative
+                break
+              }
+            }
+          }
+
+          if ($violations.Count -gt 0) {
+            $violations | Sort-Object -Unique | ForEach-Object { Write-Host "Forbidden file: $_" }
+            throw "Repository contains forbidden generated or private files."
+          }
+
+      - name: Validate project metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $project = Get-Content -LiteralPath "project.json" -Raw | ConvertFrom-Json
+          if ($project.project_name -ne "AutoIt_Static_Analyzer") {
+            throw "Unexpected project_name in project.json"
+          }
+          if (-not ([string]$project.version -match '^\d+\.\d+\.\d+$')) {
+            throw "project.json version must be semantic MAJOR.MINOR.PATCH"
+          }

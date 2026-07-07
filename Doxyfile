@@ -1,0 +1,47 @@
+PROJECT_NAME           = "AutoIt_Static_Analyzer"
+PROJECT_NUMBER         = "1.1.0"
+OUTPUT_DIRECTORY       = "docs/doxygen"
+CREATE_SUBDIRS         = NO
+ALLOW_UNICODE_NAMES    = YES
+OUTPUT_LANGUAGE        = English
+BRIEF_MEMBER_DESC      = YES
+REPEAT_BRIEF           = YES
+ALWAYS_DETAILED_SEC    = NO
+JAVADOC_AUTOBRIEF      = YES
+MULTILINE_CPP_IS_BRIEF = NO
+TAB_SIZE               = 4
+MARKDOWN_SUPPORT       = YES
+SUBGROUPING            = YES
+
+# Input files
+INPUT                  = src tests tools_wrapper tools_installer tools/doxygen examples README.md CHANGELOG.md CONTRIBUTING.md build.ps1 backup.ps1 bump.ps1
+FILE_PATTERNS          = *.py *.md *.au3 *.ps1
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */__pycache__/* */.venv/* */build/* */dist/* */*.egg-info/* */scratch*/* */.tmp/* */temp_scoping_analysis/*
+EXTENSION_MAPPING      = au3=C++ ps1=C++
+FILTER_PATTERNS        = *.au3=tools\doxygen\autoit_filter.cmd *.ps1=tools\doxygen\powershell_filter.cmd
+
+# Extraction configuration
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+
+# Warnings configuration
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+# HTML Output
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+
+# LaTeX / PDF Output (Disabled for speed/simplicity)
+GENERATE_LATEX         = NO
+
+# Main Page and local browsing compatibility
+USE_MDFILE_AS_MAINPAGE = README.md
+GENERATE_TREEVIEW      = NO
+HTML_DYNAMIC_MENUS     = NO
+
+
