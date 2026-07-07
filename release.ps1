@@ -147,7 +147,7 @@ Copy-FileTo (Join-Path $projectRoot "bin\Setup_au3Mythos_x64.exe") (Join-Path $w
 Copy-FileTo (Join-Path $projectRoot "bin\Uninstall_au3Mythos_x64.exe") (Join-Path $winStage "tools_installer\Uninstall_au3Mythos_x64.exe")
 
 # Copy default config template
-Copy-FileTo (Join-Path $projectRoot "mythos_config\config.json") (Join-Path $winStage "mythos_config\config.json")
+Copy-FileTo (Join-Path $projectRoot "resources\mythos_config\config.json") (Join-Path $winStage "mythos_config\config.json")
 
 # Copy resources
 if (Test-Path (Join-Path $projectRoot "resources")) {

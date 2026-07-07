@@ -12,7 +12,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WRAPPER_EXE = PROJECT_ROOT / "tools_wrapper" / "Au3Check_Wrapper.exe"
-CONFIG_JSON = PROJECT_ROOT / "mythos_config" / "config.json"
+CONFIG_JSON = PROJECT_ROOT / "resources" / "mythos_config" / "config.json"
 ORIGINAL_EXE_PATH = Path(r"C:\Program Files (x86)\AutoIt3\Au3Check.exe")
 ORIGINAL_DAT_PATH = Path(r"C:\Program Files (x86)\AutoIt3\Au3Check.dat")
 

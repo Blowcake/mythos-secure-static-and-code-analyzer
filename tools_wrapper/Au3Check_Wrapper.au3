@@ -268,8 +268,8 @@ Func Main()
             Local $sTemplatePath = ""
             If FileExists(@ScriptDir & "\mythos_config\config.json") Then
                 $sTemplatePath = @ScriptDir & "\mythos_config\config.json"
-            ElseIf FileExists(@ScriptDir & "\..\mythos_config\config.json") Then
-                $sTemplatePath = @ScriptDir & "\..\mythos_config\config.json"
+            ElseIf FileExists(@ScriptDir & "\..\resources\mythos_config\config.json") Then
+                $sTemplatePath = @ScriptDir & "\..\resources\mythos_config\config.json"
             EndIf
             
             If $sTemplatePath <> "" Then

@@ -264,6 +264,9 @@ Func RunInstallSequence()
     Local $sSourceBin = $sSourceRoot & "\bin"
     Local $sSourceDocs = $sSourceRoot & "\docs"
     Local $sSourceConfig = $sSourceRoot & "\mythos_config"
+    If Not FileExists($sSourceConfig & "\config.json") And FileExists($sSourceRoot & "\resources\mythos_config\config.json") Then
+        $sSourceConfig = $sSourceRoot & "\resources\mythos_config"
+    EndIf
     Local $sSourceInstaller = $sSourceRoot & "\tools_installer"
     
     If FileExists($sSourceBin & "\autoit_windows_x64_scoping_analyzer.exe") Then
@@ -427,6 +430,9 @@ Func InstallFiles(Const $sDest)
     Local $sSourceBin = $sSourceRoot & "\bin"
     Local $sSourceDocs = $sSourceRoot & "\docs"
     Local $sSourceConfig = $sSourceRoot & "\mythos_config"
+    If Not FileExists($sSourceConfig & "\config.json") And FileExists($sSourceRoot & "\resources\mythos_config\config.json") Then
+        $sSourceConfig = $sSourceRoot & "\resources\mythos_config"
+    EndIf
     Local $sSourceInstaller = $sSourceRoot & "\tools_installer"
     
     ; Copy Analyzer and GUI Manager Binaries
