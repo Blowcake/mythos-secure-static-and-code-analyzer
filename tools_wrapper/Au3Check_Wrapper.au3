@@ -9,7 +9,7 @@ Opt("MustDeclareVars", 1)
 #include <APIsysConstants.au3>
 #include <WinAPI.au3>
 #include <WinAPISys.au3>
-#include "..\..\Include\JSON.au3"
+#include "..\third_party\autoit-json-udf\JSON.au3"
 
 ; #UDF# =========================================================================================================================
 ; Name...........: Au3Check_Wrapper

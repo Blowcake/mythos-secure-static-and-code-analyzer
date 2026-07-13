@@ -1,5 +1,5 @@
 PROJECT_NAME           = "AutoIt_Static_Analyzer"
-PROJECT_NUMBER         = "1.1.0"
+PROJECT_NUMBER         = "1.2.0"
 OUTPUT_DIRECTORY       = "docs/doxygen"
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = YES
@@ -43,5 +43,6 @@ GENERATE_LATEX         = NO
 USE_MDFILE_AS_MAINPAGE = README.md
 GENERATE_TREEVIEW      = NO
 HTML_DYNAMIC_MENUS     = NO
+
 
 

@@ -11,6 +11,7 @@ import textwrap
 import unittest
 import uuid
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -1894,7 +1895,172 @@ class AnalyzerOnlyWarningFixtureTests(unittest.TestCase):
                     self.assertEqual(analyzer_result.returncode, 0, analyzer_output)
 
                     report = report_text(out_dir)
-                    self.assertNotIn(fixture["forbidden_warning"], report)
+            self.assertNotIn(fixture["forbidden_warning"], report)
+
+
+class AspirinJunkieRegressionTests(unittest.TestCase):
+    FULL_ARGS = [
+        "-d", "-w", "1", "-w", "2", "-w", "3", "-w", "4",
+        "-w", "5", "-w", "6", "-w", "7",
+        "--enable-experimental-checks", "--json-out",
+    ]
+
+    def run_json(self, source_path, out_dir, extra_args=None):
+        result = run_analyzer(source_path, out_dir, extra_args or ["--json-out"])
+        self.assertTrue(result.stdout.strip(), result.stderr)
+        return result, json.loads(result.stdout)
+
+    def test_aspirinjunkie_cases_a_to_j_are_clean(self):
+        source_path = PROJECT_ROOT / "docs_internal" / "false_positives_asprinjunky" / "AspirinJunkie_FalsePositive_Cases_A-J.au3"
+        with make_temp_dir("aspirinjunkie_a_j_") as tmp:
+            result, payload = self.run_json(source_path, Path(tmp) / "analysis", self.FULL_ARGS)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(payload["summary"], {"total": 0, "errors": 0, "warnings": 0})
+
+    def test_terminal_branch_redeclaration_is_clean_but_reachable_duplicate_warns(self):
+        clean_source = """
+        Func Probe($first, $second)
+            If $first Then
+                Local $iErr = 1
+                Return SetError($iErr, 0, False)
+            EndIf
+            If $second Then
+                Local $iErr = 2
+                Return SetError($iErr, 0, False)
+            EndIf
+            Return True
+        EndFunc
+        """
+        bad_source = """
+        Func Probe($first)
+            If $first Then
+                Local $iErr = 1
+            EndIf
+            Local $iErr = 2
+            Return $iErr
+        EndFunc
+        """
+        with make_temp_dir("aspirinjunkie_redeclare_") as tmp:
+            tmp_path = Path(tmp)
+            clean_path = tmp_path / "clean.au3"
+            bad_path = tmp_path / "bad.au3"
+            clean_path.write_text(normalize_source(clean_source), encoding="ascii", newline="\r\n")
+            bad_path.write_text(normalize_source(bad_source), encoding="ascii", newline="\r\n")
+            clean_result, clean_payload = self.run_json(clean_path, tmp_path / "clean_out", ["-w", "3", "--json-out"])
+            self.assertEqual(clean_result.returncode, 0, clean_result.stdout + clean_result.stderr)
+            self.assertEqual(clean_payload["summary"]["total"], 0)
+            bad_result, bad_payload = self.run_json(bad_path, tmp_path / "bad_out", ["-w", "3", "--json-out"])
+            self.assertEqual(bad_result.returncode, 1, bad_result.stdout + bad_result.stderr)
+            self.assertIn("Duplicate Declaration", [item["type"] for item in bad_payload["diagnostics"]])
+
+    def test_counterexamples_preserve_real_diagnostics(self):
+        source = """
+        Func StringArray($text)
+            Local $matches = StringRegExp($text, "(.)", 3)
+            If $matches Then Return 1
+            Return 0
+        EndFunc
+
+        Func UnboundDim()
+            Dim $value = 1
+            Return 0
+        EndFunc
+
+        Func LocalDeadStore()
+            Local $result = 0
+            $result = 42
+        EndFunc
+
+        Func UnsafeInline($active)
+            If $active Then Local $value = 1
+            Return $value
+        EndFunc
+        """
+        with make_temp_dir("aspirinjunkie_counters_") as tmp:
+            tmp_path = Path(tmp)
+            source_path = tmp_path / "counter.au3"
+            source_path.write_text(normalize_source(source), encoding="ascii", newline="\r\n")
+            result, payload = self.run_json(source_path, tmp_path / "out", self.FULL_ARGS)
+            self.assertNotEqual(result.returncode, 0)
+            warning_types = {item["type"] for item in payload["diagnostics"]}
+            self.assertIn("Array Used as Boolean", warning_types)
+            self.assertIn("Deprecated Dim Use", warning_types)
+            self.assertIn("Dead Store", warning_types)
+            self.assertIn("Potential Uninitialized Use", warning_types)
+
+    def test_duplicate_case_only_warns_across_distinct_clauses_in_both_scopes(self):
+        source = """
+        Switch $CmdLineRaw
+            Case "j", "J"
+                ConsoleWrite("same clause")
+            Case "j"
+                ConsoleWrite("later clause")
+        EndSwitch
+
+        Func Probe($char)
+            Switch $char
+                Case "k", "K"
+                    Return 1
+                Case "k"
+                    Return 2
+            EndSwitch
+            Return 0
+        EndFunc
+        """
+        with make_temp_dir("aspirinjunkie_cases_") as tmp:
+            tmp_path = Path(tmp)
+            source_path = tmp_path / "cases.au3"
+            source_path.write_text(normalize_source(source), encoding="ascii", newline="\r\n")
+            result, payload = self.run_json(source_path, tmp_path / "out", ["--enable-experimental-checks", "--json-out"])
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            duplicates = [item for item in payload["diagnostics"] if item["type"] == "Duplicate Case Value"]
+            self.assertEqual(len(duplicates), 2, duplicates)
+            self.assertEqual({item["func"] for item in duplicates}, {"<global>", "Probe"})
+
+    def test_source_decoder_supports_ansi_utf8_bom_and_utf16(self):
+        source = '''Global $g_Value = 1\r\nLocal $s = "Grüße"\r\nConsoleWrite($s & $g_Value)\r\n'''
+        encodings = {
+            "ansi": source.encode("cp1252"),
+            "utf8_bom": b"\xef\xbb\xbf" + source.encode("utf-8"),
+            "utf16_le": b"\xff\xfe" + source.encode("utf-16-le"),
+            "utf16_be": b"\xfe\xff" + source.encode("utf-16-be"),
+        }
+        with make_temp_dir("aspirinjunkie_encoding_") as tmp:
+            tmp_path = Path(tmp)
+            for name, source_bytes in encodings.items():
+                with self.subTest(encoding=name):
+                    source_path = tmp_path / f"{name}.au3"
+                    source_path.write_bytes(source_bytes)
+                    result, payload = self.run_json(source_path, tmp_path / f"{name}_out")
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(payload["summary"]["total"], 0)
+                    preprocessed = (tmp_path / f"{name}_out" / "preprocessed_source.au3").read_text(encoding="utf-8")
+                    self.assertIn('"Grüße"', preprocessed)
+                    self.assertTrue(preprocessed.startswith("Global"), repr(preprocessed[:20]))
+
+    def test_source_decoder_rejects_malformed_utf16_with_nonzero_exit(self):
+        with make_temp_dir("aspirinjunkie_bad_encoding_") as tmp:
+            tmp_path = Path(tmp)
+            source_path = tmp_path / "bad.au3"
+            source_path.write_bytes(b"\xff\xfe\x00\xd8")
+            result, payload = self.run_json(source_path, tmp_path / "out")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(payload["summary"]["errors"], 1)
+            self.assertEqual(payload["diagnostics"][0]["type"], "Source Read Error")
+
+    def test_mixed_encoding_include_tree_uses_shared_source_policy(self):
+        with make_temp_dir("aspirinjunkie_mixed_include_") as tmp:
+            tmp_path = Path(tmp)
+            include_path = tmp_path / "child.au3"
+            main_path = tmp_path / "main.au3"
+            include_source = '#include-once\r\nGlobal $g_Text = "Grüße"\r\n'
+            include_path.write_bytes(b"\xff\xfe" + include_source.encode("utf-16-le"))
+            main_path.write_bytes(b'#include "child.au3"\r\nConsoleWrite($g_Text)\r\n')
+            result, payload = self.run_json(main_path, tmp_path / "out")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(payload["summary"]["total"], 0)
+            preprocessed = (tmp_path / "out" / "preprocessed_source.au3").read_text(encoding="utf-8")
+            self.assertIn('Global $g_Text = "Grüße"', preprocessed)
 
 
 class Au3CheckGoldenParityTests(unittest.TestCase):

@@ -22,6 +22,17 @@
 
 ---
 
+### Major Update (v1.2.0)
+
+* **False-Positive Hardening**: Robust refinements implemented based on detailed reports and test cases contributed by AspirinJunkie.
+* **Scoping Heuristics & Terminal Branches**: Complete resolution of cases A–J alongside path-sensitive variable declaration checks (e.g. `Local $iErr` in `JSON.au3` terminal branches).
+* **Encoding-Safe Source Parsing**: Enhanced file reading with native support for UTF-8 (with/without BOM), UTF-16 (LE/BE), and ANSI sources to prevent decoding issues.
+* **Expanded Test Suite**: Additional regression tests establishing complete counter-fixture parity.
+* **Performance Optimizations**: A measured runtime reduction of **8.93%** across comprehensive includes.
+* **Advanced Diagnostics**: In-place deep JSON analysis and runtime line-mapping features for locating execution errors in consolidated preprocessed files.
+
+---
+
 This project is built for everyone who recognizes the critical importance of quality and code hygiene—those who are ready to step it up and go the extra mile that makes the difference between *"it works"* and *"it works stably and cleanly under all foreseeable scenarios."*
 
 ---

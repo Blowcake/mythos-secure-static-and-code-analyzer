@@ -171,7 +171,7 @@ While 1
         Case $idCancelBtn
             If $idCancelBtn == $nMsg Then Exit 0
         Case $idAboutBtn
-            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Setup", "au3Mythos Static Analyzer Setup" & @CRLF & "Version 1.1.0" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
+            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Setup", "au3Mythos Static Analyzer Setup" & @CRLF & "Version 1.2.0" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
         Case $idBrowseBtn
             $sSelDir = FileSelectFolder("Select Installation Directory", "", 1, GUICtrlRead($idDirInput), $hMainGui)
             If Not @error And $sSelDir <> "" Then
@@ -375,7 +375,7 @@ Func RunInstallSequence()
     If IsAdmin() And StringInStr($sDest, "Temp") == 0 Then
         Local $sUnReg = "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos"
         RegWrite($sUnReg, "DisplayName", "REG_SZ", "au3Mythos Static Checker & Scoping Analyzer")
-        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.1.0")
+        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.2.0")
         RegWrite($sUnReg, "Publisher", "REG_SZ", "Harald Frank")
         RegWrite($sUnReg, "UninstallString", "REG_SZ", '"' & $sDest & '\Uninstall_au3Mythos_x64.exe"')
         RegWrite($sUnReg, "DisplayIcon", "REG_SZ", '"' & $sDest & '\au3Mythos_Settings_x64.exe",0')
@@ -498,7 +498,7 @@ Func InstallFiles(Const $sDest)
     If IsAdmin() And StringInStr($sDest, "Temp") == 0 Then
         Local $sUnReg = "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos"
         RegWrite($sUnReg, "DisplayName", "REG_SZ", "au3Mythos Static Checker & Scoping Analyzer")
-        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.1.0")
+        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.2.0")
         RegWrite($sUnReg, "Publisher", "REG_SZ", "Harald Frank")
         RegWrite($sUnReg, "UninstallString", "REG_SZ", '"' & $sDest & '\Uninstall_au3Mythos_x64.exe"')
         RegWrite($sUnReg, "DisplayIcon", "REG_SZ", '"' & $sDest & '\au3Mythos_Settings_x64.exe",0')
@@ -510,3 +510,4 @@ Func InstallFiles(Const $sDest)
     
     Return 0
 EndFunc
+

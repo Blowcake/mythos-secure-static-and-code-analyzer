@@ -23,6 +23,11 @@ $jsonPath = Join-Path $projDir "project.json"
 $pyprojectPath = Join-Path $projDir "pyproject.toml"
 $initPath = Join-Path $projDir "src\autoit_static_analyzer\__init__.py"
 $doxyPath = Join-Path $projDir "Doxyfile"
+$analyzerPath = Join-Path $projDir "src\autoit_static_analyzer\autoit_windows_x64_scoping_analyzer.py"
+$settingsPath = Join-Path $projDir "tools_wrapper\au3Mythos_Settings.au3"
+$setupPath = Join-Path $projDir "tools_installer\Setup_au3Mythos_x64.au3"
+$uninstallPath = Join-Path $projDir "tools_installer\Uninstall_au3Mythos_x64.au3"
+
 
 if (-not (Test-Path $jsonPath)) {
     Write-Host "ERROR: project.json not found in $projDir." -ForegroundColor Red
@@ -79,6 +84,33 @@ if (Test-Path $doxyPath) {
     $text = [regex]::Replace($text, '(?m)^PROJECT_NUMBER\s*=.*$', "PROJECT_NUMBER         = `"$newVersion`"")
     Set-Content -Path $doxyPath -Value $text
 }
+
+if (Test-Path $analyzerPath) {
+    $text = Get-Content $analyzerPath -Raw
+    $text = [regex]::Replace($text, '__version__\s*=\s*".*"', ('__version__ = "' + $newVersion + '"'))
+    Set-Content -Path $analyzerPath -Value $text
+}
+
+if (Test-Path $settingsPath) {
+    $text = Get-Content $settingsPath -Raw
+    $text = [regex]::Replace($text, '(?i)"Version \d+\.\d+\.\d+"', ('"Version ' + $newVersion + '"'))
+    Set-Content -Path $settingsPath -Value $text
+}
+
+if (Test-Path $setupPath) {
+    $text = Get-Content $setupPath -Raw
+    $text = [regex]::Replace($text, '(?i)"Version \d+\.\d+\.\d+"', ('"Version ' + $newVersion + '"'))
+    $text = [regex]::Replace($text, '(?i)"DisplayVersion"\s*,\s*"REG_SZ"\s*,\s*"\d+\.\d+\.\d+"', ('"DisplayVersion", "REG_SZ", "' + $newVersion + '"'))
+    Set-Content -Path $setupPath -Value $text
+}
+
+if (Test-Path $uninstallPath) {
+    $text = Get-Content $uninstallPath -Raw
+    $text = [regex]::Replace($text, '(?i)"Version \d+\.\d+\.\d+"', ('"Version ' + $newVersion + '"'))
+    Set-Content -Path $uninstallPath -Value $text
+}
+
+
 
 Write-Host "Version bumped successfully: " -NoNewline
 Write-Host "$currentVersion " -ForegroundColor DarkGray -NoNewline

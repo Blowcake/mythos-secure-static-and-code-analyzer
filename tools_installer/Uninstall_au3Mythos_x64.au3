@@ -165,7 +165,7 @@ While 1
         Case $idCancelBtn
             If $idCancelBtn == $nMsg Then Exit 0
         Case $idAboutBtn
-            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Uninstaller", "au3Mythos Static Analyzer Uninstaller" & @CRLF & "Version 1.1.0" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
+            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Uninstaller", "au3Mythos Static Analyzer Uninstaller" & @CRLF & "Version 1.2.0" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
         Case $idUninstallBtn
             ; If we are on Page 2 and uninstall finished, this button functions as "Finish" / "Beenden" or "Close"
             If $iCurrentPage == 2 Then
@@ -402,3 +402,4 @@ Func PerformUninstall(Const $sDest)
     
     Return 0
 EndFunc
+

@@ -5,16 +5,80 @@
 @copyright Copyright (c) 2026 Harald Frank. All rights reserved.
 """
 import argparse
+from functools import lru_cache
 import os
 import re
 import sys
 import urllib.parse
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # Default AutoIt standard include directory
 AUTOIT_STD_INCLUDE = r"C:\Program Files (x86)\AutoIt3\Include"
 PROJECT_MARKER_FILES = ('.git', 'project.json', 'pyproject.toml', 'setup.py', 'requirements.txt')
+AUTOIT_ANSI_ENCODING = 'cp1252'
+ERROR_DIAGNOSTIC_TYPES = {
+    'Undeclared Variable',
+    'Block Scoping Bug',
+    'Reference Before Declaration',
+    'Source Read Error',
+}
+
+
+class AutoItSourceError(Exception):
+    """Raised when an AutoIt source file cannot be decoded without data loss."""
+
+
+def read_autoit_source(file_path):
+    """Read an AutoIt source file according to its BOM or the Windows ANSI fallback.
+
+    AutoIt treats BOM-less scripts as ANSI.  UTF-8 and UTF-16 are Unicode source
+    formats only when their BOM is present.  Decoding is deliberately strict: a
+    source file must never be changed silently merely to let analysis continue.
+    """
+    try:
+        with open(file_path, 'rb') as source_file:
+            raw = source_file.read()
+    except OSError as exc:
+        raise AutoItSourceError(f"could not read source file: {exc}") from exc
+
+    try:
+        if raw.startswith(b'\x00\x00\xfe\xff') or raw.startswith(b'\xff\xfe\x00\x00'):
+            raise AutoItSourceError("UTF-32 AutoIt source is not supported")
+        if raw.startswith(b'\xef\xbb\xbf'):
+            text = raw.decode('utf-8-sig', errors='strict')
+        elif raw.startswith(b'\xff\xfe'):
+            text = raw[2:].decode('utf-16-le', errors='strict')
+        elif raw.startswith(b'\xfe\xff'):
+            text = raw[2:].decode('utf-16-be', errors='strict')
+        else:
+            text = raw.decode(AUTOIT_ANSI_ENCODING, errors='strict')
+    except UnicodeError as exc:
+        raise AutoItSourceError(f"source decoding failed: {exc}") from exc
+
+    if '\x00' in text:
+        raise AutoItSourceError("source contains NUL characters after decoding; missing or unsupported BOM")
+    return text
+
+
+def read_autoit_lines(file_path, keepends=False):
+    """Return decoded AutoIt source as lines using the central source policy."""
+    return read_autoit_source(file_path).splitlines(keepends=keepends)
+
+
+@lru_cache(maxsize=131072)
+def leading_keyword(text):
+    """Return the lowercase identifier at the start of an AutoIt statement."""
+    stripped = text.lstrip()
+    end = 0
+    while end < len(stripped) and (stripped[end].isalnum() or stripped[end] == '_'):
+        end += 1
+    return stripped[:end].lower()
+
+
+def starts_with_keyword(text, keyword):
+    """Return whether text starts with an AutoIt keyword at a word boundary."""
+    return leading_keyword(text) == keyword
 
 def add_unique_path(paths, path):
     """
@@ -86,6 +150,7 @@ def discover_include_dirs(main_file):
 
     return include_dirs
 
+@lru_cache(maxsize=131072)
 def split_code_comment(line):
     """
     @brief Splits a line of code into the code statement and any trailing comment.
@@ -120,6 +185,7 @@ def split_code_comment(line):
         i += 1
     return line, ''
 
+@lru_cache(maxsize=131072)
 def strip_strings(code_part):
     """
     @brief Strips all string literals (single and double quoted) from a code snippet.
@@ -156,6 +222,20 @@ def strip_strings(code_part):
             result.append(ch)
         i += 1
     return ''.join(result)
+
+
+def normalize_simple_case_token(expr):
+    """Normalize a simple Switch Case literal using AutoIt's comparisons."""
+    expr = split_code_comment(expr)[0].strip()
+    variable = re.match(r'^\s*(\$\w+)\s*$', expr)
+    if variable:
+        return ('var', variable.group(1).lower())
+    if re.match(r'(?i)^[-+]?(?:0x[0-9a-f]+|\d+(?:\.\d+)?)$', expr):
+        return ('num', expr.lower())
+    string_value = re.match(r'^(["\'])(.*)\1$', expr)
+    if string_value:
+        return ('str', string_value.group(2).lower())
+    return None
 
 def replace_strings_with_placeholder(code_part):
     """
@@ -202,13 +282,14 @@ def replace_strings_with_placeholder(code_part):
         i += 1
     return ''.join(result)
 
-def split_top_level(text, separator):
+@lru_cache(maxsize=131072)
+def _split_top_level_cached(text, separator):
     """
     @brief Splits a string by a separator only at the top level of nesting.
     @details Respects parenthesis and bracket nesting depths, as well as string literals.
     @param text The text to split.
     @param separator The character separator to split on (e.g. ',' or '=').
-    @return A list of split substrings.
+    @return An immutable tuple of split substrings for safe cache reuse.
     """
     parts = []
     current = []
@@ -262,7 +343,12 @@ def split_top_level(text, separator):
         i += 1
     if current:
         parts.append(''.join(current))
-    return parts
+    return tuple(parts)
+
+
+def split_top_level(text, separator):
+    """Split at top-level separators while preserving the historic list API."""
+    return list(_split_top_level_cached(text, separator))
 
 def split_assignment_left(text):
     """
@@ -352,17 +438,16 @@ def get_clickable_link(file_path, line_num):
 
 def read_source_line(file_path, line_num):
     """
-    @brief Reads a specific line from a file using UTF-8 encoding.
+    @brief Reads a specific line using the central AutoIt source encoding policy.
     @param file_path File path to read from.
     @param line_num 1-based index of the line to retrieve.
     @return The raw line content, or an empty string on failure.
     """
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            for idx, src_line in enumerate(f, start=1):
-                if idx == line_num:
-                    return src_line.rstrip('\r\n')
-    except OSError:
+        for idx, src_line in enumerate(read_autoit_lines(file_path), start=1):
+            if idx == line_num:
+                return src_line
+    except AutoItSourceError:
         return ""
     return ""
 
@@ -537,10 +622,16 @@ class AutoItPreprocessor:
             return
 
         try:
-            with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-        except Exception as e:
-            print(f"Error reading file {abs_path}: {e}", file=sys.stderr)
+            lines = read_autoit_lines(abs_path, keepends=True)
+        except AutoItSourceError as e:
+            self.warnings.append({
+                'func': '<global>',
+                'var': '',
+                'type': 'Source Read Error',
+                'desc': f"Cannot analyze source file '{abs_path}': {e}",
+                'file': abs_path,
+                'line': 1,
+            })
             return
 
         has_include_once = False
@@ -715,6 +806,7 @@ class AutoItScopingAnalyzer:
         """
         self.decl_rx = re.compile(r'(?i)^\s*(Static\s+)?(Global|Local|Dim|Static)\s+(?:Const\s+)?(.+)')
         self.var_ref_rx = re.compile(r'\$\w+')
+        self.func_signature_rx = re.compile(r'(?i)^\s*Func\s+(\w+)\s*\(')
         self.warnings = []
         self.seterror_return_funcs = set()
         self.seterror_value_passthrough_funcs = set()
@@ -735,13 +827,16 @@ class AutoItScopingAnalyzer:
             }
         self.warnings_config = warnings_config
 
+    @lru_cache(maxsize=131072)
     def parse_func_signature(self, line):
         """
         @brief Parses a function declaration line and extracts parameters.
         @param line The line containing the Func declaration.
         @return Tuple of (function_name, parameter_string), or None if not a Func.
         """
-        m = re.match(r'(?i)^\s*Func\s+(\w+)\s*\(', line)
+        if not starts_with_keyword(line, 'func'):
+            return None
+        m = self.func_signature_rx.match(line)
         if not m:
             return None
         open_pos = line.find('(', m.end() - 1)
@@ -947,6 +1042,7 @@ class AutoItScopingAnalyzer:
         warned_uninitialized = set()
         guarded_assignments = {}
         boolean_guarded_assignments = {}
+        conditional_initializers = {}
         assignment_events = []
         map_vars = set()
         map_known_keys = {}
@@ -981,10 +1077,16 @@ class AutoItScopingAnalyzer:
 
         # Inject function parameters as function-level declarations (parameters are not constants)
         param_vars = set()
+        byref_param_vars = set()
         if func_params:
-            for var in re.findall(r'\$\w+', func_params):
-                var_lower = var.lower()
+            for param_part in split_top_level(func_params, ','):
+                param_match = re.search(r'(\$\w+)', param_part)
+                if not param_match:
+                    continue
+                var_lower = param_match.group(1).lower()
                 param_vars.add(var_lower)
+                if re.search(r'(?i)\bByRef\b', param_part):
+                    byref_param_vars.add(var_lower)
                 self.register_declaration(declarations, var_lower, func_start_line, None, False, None, ())
 
         def get_current_block_range(ln):
@@ -1223,16 +1325,42 @@ class AutoItScopingAnalyzer:
             return m.group(1).lower() if m else None
 
         def simple_case_token(expr):
-            expr = split_code_comment(expr)[0].strip()
-            var_expr = simple_var_expr(expr)
-            if var_expr:
-                return ('var', var_expr)
-            if re.match(r'(?i)^[-+]?(?:0x[0-9a-f]+|\d+(?:\.\d+)?)$', expr):
-                return ('num', expr.lower())
-            m_string = re.match(r'^(["\'])(.*)\1$', expr)
-            if m_string:
-                return ('str', m_string.group(2).lower())
-            return None
+            return normalize_simple_case_token(expr)
+
+        def function_returns_array(func_lower, call_args):
+            if func_lower != 'stringregexp':
+                return func_lower in KNOWN_ARRAY_FUNCS
+            flag_text = call_args[2].strip() if len(call_args) >= 3 else '0'
+            if flag_text.lower() in {
+                '$str_regexparraymatch',
+                '$str_regexparrayfullmatch',
+                '$str_regexparrayglobalmatch',
+                '$str_regexparrayglobalfullmatch',
+            }:
+                return True
+            if not re.match(r'^[-+]?\d+$', flag_text):
+                return False
+            return int(flag_text, 10) in (1, 2, 3, 4)
+
+        def declaration_path_terminates(decl):
+            block_range = decl[1]
+            return bool(block_range and len(block_range) > 4 and block_range[4])
+
+        def collect_clause_references(clause_text, clause_ln, original_line):
+            clause_code = self.strip_strings(split_code_comment(clause_text)[0])
+            for clause_var in self.var_ref_rx.findall(clause_code):
+                references.append((clause_ln, clause_var.lower(), original_line, get_current_guards()))
+
+        def apply_inline_terminal_postcondition(line_text):
+            match = re.match(r'(?i)^\s*If\s+(Not\s+)?(\$\w+)\s+Then\s+(?:Return|Exit)\b', split_code_comment(line_text)[0])
+            if not match:
+                return
+            guard_var = match.group(2).lower()
+            surviving_polarity = 'pos' if match.group(1) else 'not'
+            for initialized_var, guards in conditional_initializers.items():
+                if (guard_var, surviving_polarity) in guards:
+                    maybe_uninitialized.discard(initialized_var)
+                    uninit_candidates.discard(initialized_var)
 
         def record_value_set_assignment(var_lower, rhs_text, conditional=False):
             rhs_match = re.match(r'^\s*(\$\w+)\s*$', rhs_text)
@@ -1533,6 +1661,8 @@ class AutoItScopingAnalyzer:
             assignment_lhs_vars = set()
             in_error_guard_path = '@error' in code_no_strings.lower() or any('@error' in guard for guard in get_current_guards())
 
+            apply_inline_terminal_postcondition(stripped)
+
             if unreachable_after and not warned_unreachable and not stripped_lower.startswith('#forceref'):
                 add_warning(
                     'Unreachable Code',
@@ -1642,7 +1772,8 @@ class AutoItScopingAnalyzer:
                 if func_lower in self.seterror_return_funcs and func_lower not in self.seterror_value_passthrough_funcs:
                     unchecked_seterror_results[var_lower] = (ln, func_name_called)
                     
-                if func_lower in KNOWN_ARRAY_FUNCS:
+                returns_array = function_returns_array(func_lower, call_args)
+                if returns_array:
                     # Register variables receiving known array results as safe 1D arrays
                     known_dims = KNOWN_ARRAY_DIMS.get(func_lower, (None,))
                     if var_lower in global_vars:
@@ -1678,10 +1809,10 @@ class AutoItScopingAnalyzer:
                     primary_extended_call = (ln, func_name_called)
                     extended_intervening_calls = []
 
-                if func_lower in ('stringsplit', 'stringregexp'):
+                if func_lower == 'stringsplit' or (func_lower == 'stringregexp' and returns_array):
                     unchecked_array_results[var_lower] = (ln, func_name_called)
 
-                if func_lower in KNOWN_ARRAY_FUNCS:
+                if returns_array:
                     array_value_sources[var_lower] = func_lower
 
                 if func_lower == 'ubound' and call_args:
@@ -1834,6 +1965,8 @@ class AutoItScopingAnalyzer:
                 continue
 
             if stripped_lower.startswith('next') or stripped_lower.startswith('wend') or stripped_lower.startswith('until'):
+                if stripped_lower.startswith('until'):
+                    collect_clause_references(re.sub(r'(?i)^\s*Until\b', '', stripped), ln, line)
                 if stack and stack[-1][0] == 'loop':
                     top = stack.pop()
                     top[2][1] = ln
@@ -1845,6 +1978,10 @@ class AutoItScopingAnalyzer:
             # ElseIf / Else
             m_elseif = re.match(r'(?i)^\s*(elseif\s|else\b)', stripped)
             if m_elseif:
+                if stripped_lower.startswith('elseif'):
+                    elseif_condition = re.sub(r'(?i)^\s*ElseIf\s+', '', split_code_comment(stripped)[0])
+                    elseif_condition = re.sub(r'(?i)\s+Then\s*$', '', elseif_condition)
+                    collect_clause_references(elseif_condition, ln, line)
                 if stack and stack[-1][0] == 'if':
                     sub_blocks = stack[-1][2]
                     if sub_blocks:
@@ -1855,6 +1992,9 @@ class AutoItScopingAnalyzer:
 
             # Case
             if stripped_lower.startswith('case ') or stripped_lower == 'case':
+                case_reference_text = re.sub(r'(?i)^\s*Case\s+', '', split_code_comment(stripped)[0])
+                if not re.match(r'(?i)^\s*Else\b', case_reference_text):
+                    collect_clause_references(case_reference_text, ln, line)
                 if stack and stack[-1][0] in ('switch', 'select'):
                     sub_blocks = stack[-1][2]
                     if sub_blocks:
@@ -1865,6 +2005,8 @@ class AutoItScopingAnalyzer:
                     if stack[-1][0] == 'switch' and kind == 'case' and len(stack[-1]) > 4:
                         case_text = re.sub(r'(?i)^\s*case\s+', '', split_code_comment(stripped)[0]).strip()
                         case_tokens = set()
+                        clause_literal_tokens = set()
+                        new_case_tokens = []
                         for case_part in split_top_level(case_text, ','):
                             case_var = simple_var_expr(case_part)
                             if case_var:
@@ -1873,6 +2015,9 @@ class AutoItScopingAnalyzer:
                             token = simple_case_token(case_part)
                             if token and len(stack[-1]) > 6:
                                 seen_cases = stack[-1][6]
+                                if token in clause_literal_tokens:
+                                    continue
+                                clause_literal_tokens.add(token)
                                 if token in seen_cases and self.experimental_checks:
                                     orig_file, orig_ln = line_mappings[ln - 1]
                                     first_ln = seen_cases[token]
@@ -1885,7 +2030,9 @@ class AutoItScopingAnalyzer:
                                         'line': orig_ln
                                     })
                                 else:
-                                    seen_cases[token] = ln
+                                    new_case_tokens.append(token)
+                        for token in new_case_tokens:
+                            stack[-1][6][token] = ln
                         if len(stack[-1]) > 5:
                             stack[-1][5] = case_tokens
                 continue
@@ -1917,9 +2064,11 @@ class AutoItScopingAnalyzer:
                     uninit_candidates.discard(enum_var)
                 continue
 
-            m_decl = self.decl_rx.match(stripped)
+            inline_decl = re.match(r'(?i)^\s*If\s+(.+?)\s+Then\s+((?:Static\s+)?(?:Global|Local|Dim|Static)\s+.+)$', split_code_comment(stripped)[0])
+            declaration_text = inline_decl.group(2) if inline_decl else stripped
+            m_decl = self.decl_rx.match(declaration_text)
             if m_decl:
-                reference_code_parts = []
+                reference_code_parts = [inline_decl.group(1)] if inline_decl else []
                 scope = m_decl.group(2).lower()
                 is_const = declaration_has_const(stripped)
                 if scope in ('local', 'dim', 'static'):
@@ -1934,7 +2083,8 @@ class AutoItScopingAnalyzer:
                             reference_code_parts.append('='.join(assignment_parts[1:]))
                         var_lower, dims = self.parse_array_dimensions(left)
                         if var_lower:
-                            if self.warnings_config.get(3, False) and scope != 'dim' and dims == "scalar" and var_lower in declarations and any(d[0] != ln for d in declarations[var_lower]):
+                            prior_duplicate_decls = [d for d in declarations.get(var_lower, []) if d[0] != ln and not declaration_path_terminates(d)]
+                            if self.warnings_config.get(3, False) and scope != 'dim' and dims == "scalar" and prior_duplicate_decls:
                                 orig_file, orig_ln = line_mappings[ln - 1]
                                 first_decl_ln = [d[0] for d in declarations[var_lower] if d[0] != ln]
                                 details_val = None
@@ -1955,7 +2105,8 @@ class AutoItScopingAnalyzer:
                                     'line': orig_ln,
                                     'details': details_val
                                 })
-                            if self.warnings_config.get(6, False) and scope == 'dim':
+                            already_bound = var_lower in declarations or var_lower in global_vars
+                            if self.warnings_config.get(6, False) and scope == 'dim' and not already_bound:
                                 orig_file, orig_ln = line_mappings[ln - 1]
                                 self.warnings.append({
                                     'func': func_name,
@@ -1973,7 +2124,15 @@ class AutoItScopingAnalyzer:
                                 continue
                             record_sibling_branch_array_dim(var_lower, dims, current_range)
                             self.register_declaration(declarations, var_lower, ln, current_range, is_const, dims, get_current_guards())
-                            if len(assignment_parts) == 1 and dims == "scalar":
+                            if inline_decl and not already_bound:
+                                initializer_guards = boolean_guard_polarities(inline_decl.group(1).strip().lower())
+                                conditional_initializers.setdefault(var_lower, set()).update(initializer_guards)
+                                maybe_uninitialized.add(var_lower)
+                                uninit_candidates.add(var_lower)
+                            if inline_decl:
+                                if len(assignment_parts) > 1:
+                                    record_assignment_event(var_lower, ln, 'inline initializer')
+                            elif len(assignment_parts) == 1 and dims == "scalar":
                                 uninit_candidates.add(var_lower)
                             else:
                                 maybe_uninitialized.discard(var_lower)
@@ -2383,6 +2542,8 @@ class AutoItScopingAnalyzer:
             for assign_var, events in assignments_by_var.items():
                 if assign_var not in declarations and assign_var not in global_vars:
                     continue
+                if assign_var in byref_param_vars:
+                    continue
                 events.sort(key=lambda item: item[0])
                 read_lines = sorted(reads_by_var.get(assign_var, []))
                 first_assign_ln = events[0][0]
@@ -2703,25 +2864,24 @@ def load_builtins():
     dat_path = r"C:\Program Files (x86)\AutoIt3\Au3Check.dat"
     if os.path.exists(dat_path):
         try:
-            with open(dat_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    if line.startswith('!'):
-                        parts = line[1:].strip().split()
-                        if parts:
-                            name = parts[0].lower()
-                            min_args = 0
-                            max_args = 99
-                            if len(parts) > 1:
-                                try:
-                                    min_args = int(parts[1])
-                                except ValueError:
-                                    pass
-                            if len(parts) > 2:
-                                try:
-                                    max_args = int(parts[2])
-                                except ValueError:
-                                    pass
-                            builtins[name] = (min_args, max_args)
+            for line in read_autoit_lines(dat_path):
+                if line.startswith('!'):
+                    parts = line[1:].strip().split()
+                    if parts:
+                        name = parts[0].lower()
+                        min_args = 0
+                        max_args = 99
+                        if len(parts) > 1:
+                            try:
+                                min_args = int(parts[1])
+                            except ValueError:
+                                pass
+                        if len(parts) > 2:
+                            try:
+                                max_args = int(parts[2])
+                            except ValueError:
+                                pass
+                        builtins[name] = (min_args, max_args)
         except Exception:
             pass
     return builtins
@@ -2736,11 +2896,10 @@ def load_builtin_vars():
     dat_path = r"C:\Program Files (x86)\AutoIt3\Au3Check.dat"
     if os.path.exists(dat_path):
         try:
-            with open(dat_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    for part in line.strip().split():
-                        if part.startswith('$'):
-                            vars_set.add(part.lower())
+            for line in read_autoit_lines(dat_path):
+                for part in line.strip().split():
+                    if part.startswith('$'):
+                        vars_set.add(part.lower())
         except Exception:
             pass
     return vars_set
@@ -2774,11 +2933,10 @@ def load_valid_macros():
     dat_path = r"C:\Program Files (x86)\AutoIt3\Au3Check.dat"
     if os.path.exists(dat_path):
         try:
-            with open(dat_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    for part in line.strip().split():
-                        if part.startswith('@'):
-                            macros.add(part.lower())
+            for line in read_autoit_lines(dat_path):
+                for part in line.strip().split():
+                    if part.startswith('@'):
+                        macros.add(part.lower())
         except Exception:
             pass
     return macros
@@ -2795,9 +2953,8 @@ def collect_legacy_syntax_errors(file_path, lines=None, line_mappings=None):
     """
     if lines is None:
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = [line.rstrip('\r\n') for line in f]
-        except OSError:
+            lines = read_autoit_lines(file_path)
+        except AutoItSourceError:
             return []
 
     if line_mappings is None:
@@ -3005,7 +3162,8 @@ def collect_legacy_syntax_errors(file_path, lines=None, line_mappings=None):
             continue
         last_code = (orig_file, orig_line, line)
         lower = code.lower()
-        if re.match(r'(?i)^func\b', code):
+        first_keyword = leading_keyword(code)
+        if first_keyword == 'func':
             block_stack.append(('func', orig_file, orig_line, line))
             m_func = re.match(r'(?i)^func\s+(\w+)\s*\(', code)
             if m_func:
@@ -3054,17 +3212,17 @@ def collect_legacy_syntax_errors(file_path, lines=None, line_mappings=None):
                                 ('error', orig_file, orig_line, col, 'syntax error', line)
                             )
                             break
-        elif re.match(r'(?i)^if\b.*\bthen$', code) and not re.search(r'(?i)\bthen\s+.+', code):
+        elif first_keyword == 'if' and re.match(r'(?i)^if\b.*\bthen$', code) and not re.search(r'(?i)\bthen\s+.+', code):
             block_stack.append(('if', orig_file, orig_line, line))
-        elif re.match(r'(?i)^select\b', code):
+        elif first_keyword == 'select':
             block_stack.append(('select', orig_file, orig_line, line))
-        elif re.match(r'(?i)^switch\b', code):
+        elif first_keyword == 'switch':
             block_stack.append(('switch', orig_file, orig_line, line))
-        elif re.match(r'(?i)^for\b', code):
+        elif first_keyword == 'for':
             block_stack.append(('for', orig_file, orig_line, line))
-        elif re.match(r'(?i)^while\b', code):
+        elif first_keyword == 'while':
             block_stack.append(('while', orig_file, orig_line, line))
-        elif re.match(r'(?i)^do\b', code):
+        elif first_keyword == 'do':
             block_stack.append(('do', orig_file, orig_line, line))
         elif lower == 'endif':
             for pos in range(len(block_stack) - 1, -1, -1):
@@ -3102,7 +3260,7 @@ def collect_legacy_syntax_errors(file_path, lines=None, line_mappings=None):
                     del block_stack[pos]
                     break
 
-        first_word = re.match(r'(?i)^([a-zA-Z_]\w*)\b', code)
+        first_word = re.match(r'(?i)^([a-zA-Z_]\w*)\b', code) if first_keyword in unsupported_bare_functions else None
         if first_word and first_word.group(1).lower() in unsupported_bare_functions:
             func_name = first_word.group(1)
             col = 1 if func_name.lower() == 'endtry' else first_word.end(1) + 1
@@ -3342,9 +3500,8 @@ def legacy_v2_token_lines(file_path):
     symbol_tokens = {'=': 61, '(': 40, ')': 41, '+': 43, ',': 44}
     token_rx = re.compile(r'\$\w+|[A-Za-z_]\w*|\d+|[=()+,]')
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = [line.rstrip('\r\n') for line in f]
-    except OSError:
+        lines = read_autoit_lines(file_path)
+    except AutoItSourceError:
         return []
 
     out = []
@@ -3380,9 +3537,8 @@ def legacy_v3_unref_lines(file_path):
     @author Harald Frank
     """
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = [line.rstrip('\r\n') for line in f]
-    except OSError:
+        lines = read_autoit_lines(file_path)
+    except AutoItSourceError:
         return []
 
     out = []
@@ -3460,6 +3616,30 @@ def main():
         else:
             print(f"Error: main source file not found: {args.main_file}", file=sys.stderr)
         sys.exit(3)
+
+    try:
+        read_autoit_source(args.main_file)
+    except AutoItSourceError as exc:
+        if args.json_out:
+            import json
+            original_print(json.dumps({
+                "summary": {"total": 1, "errors": 1, "warnings": 0},
+                "diagnostics": [{
+                    "file": os.path.abspath(args.main_file).replace('\\', '/'),
+                    "line": 1,
+                    "column": 1,
+                    "severity": "error",
+                    "type": "Source Read Error",
+                    "func": "<global>",
+                    "var": "",
+                    "desc": f"Cannot analyze source file '{args.main_file}': {exc}",
+                }],
+            }))
+        elif is_legacy_mode:
+            original_print(f"Error : couldn't read input file: {args.main_file}: {exc}")
+        else:
+            original_print(f"Error: cannot analyze source file '{args.main_file}': {exc}", file=sys.stderr)
+        sys.exit(2)
 
 
 
@@ -3602,11 +3782,10 @@ def main():
         # Read the line of code from the original file
         original_line_text = ""
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                orig_lines = f.readlines()
-                if 1 <= original_line_num <= len(orig_lines):
-                    original_line_text = orig_lines[original_line_num - 1].strip()
-        except Exception as e:
+            orig_lines = read_autoit_lines(file_path)
+            if 1 <= original_line_num <= len(orig_lines):
+                original_line_text = orig_lines[original_line_num - 1].strip()
+        except AutoItSourceError as e:
             original_line_text = f"<Could not read source: {e}>"
             
         if args.json_out:
@@ -3657,8 +3836,12 @@ def main():
     global_local_decl_rx = re.compile(r'(?i)^\s*Local\s+(?:Const\s+)?(.+)')
     global_enum_rx = re.compile(r'(?i)^\s*Global\s+Enum\s+(.+)')
     global_const_literal_rx = re.compile(r'(?i)^\s*Global\s+Const\s+(\$\w+)\s*=\s*([^,;]+)')
+    conditional_global_rx = re.compile(
+        r'(?i)^\s*If\s+Not\s+IsDeclared\s*\(\s*(["\'])(\$?\w+)\1\s*\)\s+Then\s+(Global\s+.+)$'
+    )
     enum_values_by_file = {}
     global_numeric_consts = set()
+    top_level_switches = []
     
     in_func = False
     current_func = ""
@@ -3692,6 +3875,8 @@ def main():
     for idx, line in enumerate(merged_lines):
         line_num = idx + 1
         stripped = split_code_comment(line)[0].strip()
+        stripped_lower = stripped.lower()
+        first_keyword = leading_keyword(stripped)
         if stripped.startswith(';'):
             continue
         func_sig = analyzer.parse_func_signature(stripped)
@@ -3714,7 +3899,7 @@ def main():
                     current_func_error_passthrough_params.add(m_param.group(1).lower())
             current_func_error_passthrough_vars = set(current_func_error_passthrough_params)
             continue
-        if re.match(r'(?i)^\s*EndFunc\b', stripped):
+        if first_keyword == 'endfunc':
             if current_func and current_func_returns and all(current_func_returns):
                 analyzer.seterror_return_funcs.add(current_func)
                 if current_func_has_error_value_passthrough_return:
@@ -3733,16 +3918,18 @@ def main():
             current_func_return_constants = set()
             continue
         if in_func:
-            alias_line = re.sub(r'(?i)^\s*(Local|Global|Dim|Static)\s+(?:Const\s+)?', '', stripped)
-            m_alias = re.match(r'(?i)^\s*(\$\w+)\s*=\s*(\$\w+)\s*$', alias_line)
+            alias_line = stripped
+            if first_keyword in {'local', 'global', 'dim', 'static'}:
+                alias_line = re.sub(r'(?i)^\s*(Local|Global|Dim|Static)\s+(?:Const\s+)?', '', stripped)
+            m_alias = re.match(r'(?i)^\s*(\$\w+)\s*=\s*(\$\w+)\s*$', alias_line) if alias_line.lstrip().startswith('$') else None
             if m_alias and m_alias.group(2).lower() in current_func_error_passthrough_vars:
                 current_func_error_passthrough_vars.add(m_alias.group(1).lower())
 
-            m_return = re.match(r'(?i)^\s*Return\b\s*(.*)', stripped)
+            m_return = re.match(r'(?i)^\s*Return\b\s*(.*)', stripped) if first_keyword == 'return' else None
             if m_return:
                 record_function_return(m_return.group(1))
             else:
-                m_inline_return = re.search(r'(?i)\bThen\s+Return\b\s*(.*)', stripped)
+                m_inline_return = re.search(r'(?i)\bThen\s+Return\b\s*(.*)', stripped) if 'then' in stripped_lower and 'return' in stripped_lower else None
                 if m_inline_return:
                     record_function_return(m_inline_return.group(1))
             continue
@@ -3750,6 +3937,34 @@ def main():
         if not in_func:
             orig_file, orig_ln = line_mappings[line_num - 1]
             enum_values = enum_values_by_file.setdefault(os.path.abspath(orig_file).lower(), {})
+
+            if first_keyword == 'switch':
+                top_level_switches.append({})
+            elif first_keyword == 'endswitch':
+                if top_level_switches:
+                    top_level_switches.pop()
+            elif top_level_switches and first_keyword == 'case' and leading_keyword(stripped[4:]) != 'else':
+                case_text = re.sub(r'(?i)^\s*Case\s+', '', stripped)
+                seen_cases = top_level_switches[-1]
+                clause_tokens = set()
+                for case_part in split_top_level(case_text, ','):
+                    token = normalize_simple_case_token(case_part)
+                    if not token or token in clause_tokens:
+                        continue
+                    clause_tokens.add(token)
+                    if token in seen_cases and args.enable_experimental_checks:
+                        first_line = seen_cases[token]
+                        analyzer.warnings.append({
+                            'func': '<global>',
+                            'var': split_code_comment(case_part)[0].strip().lower(),
+                            'type': 'Duplicate Case Value',
+                            'desc': f"Duplicate Switch Case value '{split_code_comment(case_part)[0].strip()}' at line {line_num}; AutoIt Select/Switch does not fall through, so the earlier Case at line {first_line} wins.",
+                            'file': orig_file,
+                            'line': orig_ln,
+                        })
+                    else:
+                        seen_cases[token] = line_num
+
             m_global_local = global_local_decl_rx.match(stripped)
             if m_global_local and warnings_enabled.get(4, False):
                 vars_part = split_code_comment(m_global_local.group(1))[0]
@@ -3786,7 +4001,9 @@ def main():
                         next_value += 1
                 continue
 
-            m_decl = global_decl_rx.match(stripped)
+            conditional_global = conditional_global_rx.match(stripped)
+            global_declaration_text = conditional_global.group(3) if conditional_global else stripped
+            m_decl = global_decl_rx.match(global_declaration_text)
             if m_decl:
                 scope = m_decl.group(1).lower()
                 is_const = declaration_has_const(stripped)
@@ -3797,7 +4014,11 @@ def main():
                     left = split_assignment_left(part_stripped)
                     var_lower, dims = analyzer.parse_array_dimensions(left)
                     if var_lower:
-                        if warnings_enabled.get(3, False) and scope != 'dim' and dims == "scalar" and var_lower in global_vars:
+                        if conditional_global:
+                            declared_name = '$' + conditional_global.group(2).lstrip('$').lower()
+                            if var_lower != declared_name:
+                                continue
+                        if warnings_enabled.get(3, False) and not conditional_global and scope != 'dim' and dims == "scalar" and var_lower in global_vars:
                             first_decl_line = global_decl_locs.get(var_lower)
                             details_val = None
                             if first_decl_line is not None:
@@ -3870,7 +4091,7 @@ def main():
             func_lines = []
             continue
             
-        if in_func and re.match(r'(?i)^\s*EndFunc', stripped):
+        if in_func and leading_keyword(stripped) == 'endfunc':
             analyzer.analyze_function(func_name, func_params, func_start_line, func_lines, line_mappings, global_vars, global_numeric_consts)
             in_func = False
             continue
@@ -4021,7 +4242,7 @@ def main():
         json_warnings = []
         for w in all_active_warnings:
             w_type = w['type']
-            is_error = w_type in ("Undeclared Variable", "Block Scoping Bug", "Reference Before Declaration")
+            is_error = w_type in ERROR_DIAGNOSTIC_TYPES
             level = "error" if is_error else "warning"
             col = estimate_warning_col(w)
             item = {
@@ -4062,7 +4283,7 @@ def main():
     for w in all_active_warnings:
         w_type = w['type']
         
-        is_error = w_type in ("Undeclared Variable", "Block Scoping Bug", "Reference Before Declaration")
+        is_error = w_type in ERROR_DIAGNOSTIC_TYPES
         if is_error:
             has_errors = True
             active_errors += 1
@@ -4097,3 +4318,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -29,6 +29,17 @@ class LexerHelperTests(unittest.TestCase):
         parts = self.analyzer.split_top_level('$a = Foo(1, 2), $b = ["x,y", 3]', ",")
         self.assertEqual(parts, ['$a = Foo(1, 2)', ' $b = ["x,y", 3]'])
 
+    def test_cached_split_top_level_returns_independent_lists(self):
+        first = self.analyzer.split_top_level("$a, $b", ",")
+        first.append("mutated")
+        second = self.analyzer.split_top_level("$a, $b", ",")
+        self.assertEqual(second, ["$a", " $b"])
+
+    def test_leading_keyword_preserves_word_boundaries(self):
+        self.assertEqual(self.analyzer.leading_keyword("  Func Probe()"), "func")
+        self.assertEqual(self.analyzer.leading_keyword("FunctionCall()"), "functioncall")
+        self.assertFalse(self.analyzer.starts_with_keyword("FunctionCall()", "func"))
+
     def test_declaration_has_const_ignores_comments_and_names(self):
         self.assertTrue(self.analyzer.declaration_has_const("Global Const $x = 1"))
         self.assertFalse(self.analyzer.declaration_has_const("Global $x = MyConstFunc() ; Const in comment"))

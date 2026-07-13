@@ -17,7 +17,7 @@
 #include <MsgBoxConstants.au3>
 #include <ComboConstants.au3>
 #include <Array.au3>
-#include "..\..\Include\JSON.au3"
+#include "..\third_party\autoit-json-udf\JSON.au3"
 
 ; Global Variables
 Global $sConfigPath = @AppDataDir & "\au3Mythos\mythos_config\config.json"
@@ -1335,7 +1335,7 @@ Func ShowAboutDialog()
     GUICtrlSetFont(-1, 16, 800, 0, "Segoe UI")
     GUICtrlSetColor(-1, 0x1A73E8)
     
-    GUICtrlCreateLabel("Version 1.1.0", 20, 50, 380, 20)
+    GUICtrlCreateLabel("Version 1.2.0", 20, 50, 380, 20)
     GUICtrlSetFont(-1, 10, 400, 0, "Segoe UI")
     GUICtrlSetColor(-1, 0x666666)
     
@@ -1445,3 +1445,4 @@ Func ShowSplashScreen()
     Sleep(1500)
     GUIDelete($hSplash)
 EndFunc
+

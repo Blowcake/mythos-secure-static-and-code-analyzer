@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autoit-static-analyzer"
-version = "1.1.0"
+version = "1.2.0"
 description = "Static diagnostics for AutoIt source trees beyond au3check coverage."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -19,6 +19,7 @@ autoit-windows-x64-scoping-analyzer = "autoit_static_analyzer.autoit_windows_x64
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
 
 
 
