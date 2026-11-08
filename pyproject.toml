@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autoit-static-analyzer"
-version = "1.2.1"
+version = "1.2.2"
 description = "Static diagnostics for AutoIt source trees beyond au3check coverage."
 readme = "README.md"
 requires-python = ">=3.9"

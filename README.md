@@ -22,7 +22,14 @@
 
 ---
 
-### Major Update (v1.2.1)
+### Major Update (v1.2.2)
+
+* **1D `UBound($arr) > 0` Bounds Guard (incl. `ElseIf`)**: Suppresses false-positive `Array Subscript Out of Bounds` warnings when indexing `$arr[0]` on zero-initialized arrays (`Global $g_aDirs[0]`, `Local $aEmpty[0]`) inside an explicit `UBound($arr) > 0`, `>= 1`, or `<> 0` guard.
+* **Infallible Local Map/Array Helper Inference**: A fixed-point pre-pass across the included UDF tree identifies helper functions that return a locally declared Map (`Local $m[]`) or dimensioned Array (`Local $a[...]`, preserving 1D/2D/3D rank and excluding variables reassigned as scalars) on all return paths without `SetError`, eliminating false-positive `Unsafe Return Dereference` warnings.
+* **Built-in Array Returns & `MapExists` Guard**: Adds `WinList` (2D) and `_PathSplit` (1D) to `KNOWN_ARRAY_FUNCS`/`KNOWN_ARRAY_DIMS`, and recognizes `MapExists($m, ...)` / `_MapExists($m, ...)` as a Map type guard while keeping the key argument visible to dereference checks.
+* **Array Dimension Expression Reads & Same-Line RHS Self-Assignment**: Counts variables used inside local array dimension brackets (`Local $aItems[$iCount]`) as read references (`-w 5`), and prevents pre-call argument dereferences on the right-hand side of a self-assignment (`$oItem = _OL_ItemMove($oOL, $oItem, $oItem.Parent.StoreID, $vFolder)`) from being misclassified as unguarded post-call return dereferences.
+
+### Previous Update (v1.2.1)
 
 * **Strict-Mode LHS & Conditional `Local` Scoping Hardening**: Direct variable assignments without a declaration keyword (`$var = ...`, `$arr[$i] = ...`, `If ... Then $var = ...`) are now validated as scoping references against visible declaration scopes. Conditional `Local` declarations inside one `If`/`Case` branch that are assigned without `Local` in a sibling or subsequent block are deterministically caught on the assignment line as `Block Scoping Bug`, `Reference Before Declaration`, or `Undeclared Variable`.
 * **Dimension-Agnostic `IsArray` Guard & Visible-Scope Type Updates**: `IsArray($v)` guards register multi-dimensional array compatibility without creating implicit function-scope declarations or false-positive `Array Dimension Mismatch` warnings on 2D arrays (`WinList()`, SQLite 2D tables).
@@ -178,12 +185,29 @@ AutoIt_Static_Analyzer/
     au3Mythos_Settings.au3
   resources/
     mythos_logo.ico
+    mythos_logo.png
+    mythos_logo_600x327.jpg
+    mythos_config/
+      config.json
+  docs/
+    au3Mythos_User_Manual.md
+    au3Mythos_Technical_Reference.md
+    au3Mythos_JSON_API.md
+    releases/
+      v1.2.0.md
+      v1.2.1.md
+      v1.2.2.md
+  third_party/
+    autoit-json-udf/
+      JSON.au3
   examples/
     run_burnin_analysis.ps1
   tests/
     all_system_includes.au3
     test_warning_fixtures.py
     test_lexer_helpers.py
+    test_json_and_lookup.py
+    test_wrapper_e2e.py
     test_installer_e2e.py
 ```
 

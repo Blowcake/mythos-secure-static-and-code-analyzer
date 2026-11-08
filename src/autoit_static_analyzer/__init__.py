@@ -4,4 +4,4 @@
 @author Harald Frank
 @copyright Copyright (c) 2026 Harald Frank. All rights reserved.
 """
-__version__ = "1.2.1"
+__version__ = "1.2.2"

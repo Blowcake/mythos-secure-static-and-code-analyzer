@@ -2635,6 +2635,106 @@ class Au3CheckLegacyWarningsTests(unittest.TestCase):
             self.assertIn("error: Declared inside block", res.stdout)
             self.assertIn('$sNext = "stderr"', res.stdout)
 
+    def test_ubound_guard_infallible_helpers_and_array_dim_reference_no_false_positives(self):
+        source = """
+        Opt("MustDeclareVars", 1)
+
+        Global $g_aAllowedDirs[0]
+
+        Func _CreateResponse($sStatus)
+            Local $mRes[]
+            $mRes["status"] = $sStatus
+            Return $mRes
+        EndFunc
+
+        Func _CreateFixedTuple()
+            Local $aRet[4]
+            $aRet[0] = "ok"
+            Return $aRet
+        EndFunc
+
+        Func _Delegate2DGrid()
+            Return _Create2DGrid()
+        EndFunc
+
+        Func _Create2DGrid()
+            Local $aGrid[2][2]
+            $aGrid[0][0] = "cell"
+            Return $aGrid
+        EndFunc
+
+        Func _FallibleMove($oItem, $sStoreId)
+            If $sStoreId == "" Then Return SetError(1, 0, 0)
+            Return $oItem
+        EndFunc
+
+        Func _Probe($iCountInput, $oItem)
+            Local $sRoot = ""
+            If $iCountInput < 0 Then
+                $sRoot = "override"
+            ElseIf UBound($g_aAllowedDirs) > 0 Then
+                $sRoot = $g_aAllowedDirs[0]
+            EndIf
+
+            If IsObj($oItem) Then
+                $oItem = _FallibleMove($oItem, $oItem.Parent.StoreID)
+                If @error Then Return 0
+            EndIf
+
+            Local $aWin = WinList()
+            Local $iWinCount = $aWin[0][0]
+
+            Local $mResp = _CreateResponse($sRoot)
+            $mResp["win_count"] = $iWinCount
+
+            Local $aTuple = _CreateFixedTuple()
+            $mResp["tuple0"] = $aTuple[0]
+
+            Local $aGrid = _Delegate2DGrid()
+            $mResp["grid00"] = $aGrid[0][0]
+
+            Local $iCount = $iCountInput
+            Local $aTools[$iCount]
+            If $iCount > 0 Then $aTools[0] = $mResp["status"]
+            Return $aTools
+        EndFunc
+        """
+        with make_temp_dir("test_fp_hardening_") as tmp:
+            tmp_path = Path(tmp)
+            source_path = tmp_path / "main.au3"
+            source_path.write_text(normalize_source(source), encoding="utf-8", newline="\r\n")
+            out_dir = tmp_path / "analysis"
+
+            res = run_analyzer(source_path, out_dir, ["-d", "-w", "1", "-w", "2", "-w", "3", "-w", "4", "-w", "5", "-w", "6", "-w", "7"])
+            self.assertEqual(res.returncode, 0, (res.stdout or "") + (res.stderr or ""))
+
+        negative_source = """
+        Opt("MustDeclareVars", 1)
+
+        Func _MaybeArray($bFail)
+            Local $aRet[2]
+            $aRet[0] = "ok"
+            If $bFail Then $aRet = 0
+            Return $aRet
+        EndFunc
+
+        Func _ProbeNegative($bFail)
+            Local $mMap[]
+            Local $aUnchecked = _MaybeArray($bFail)
+            If MapExists($mMap, $aUnchecked[0]) Then Return 1
+            Return 0
+        EndFunc
+        """
+        with make_temp_dir("test_fp_hardening_neg_") as tmp:
+            tmp_path = Path(tmp)
+            source_path = tmp_path / "main_neg.au3"
+            source_path.write_text(normalize_source(negative_source), encoding="utf-8", newline="\r\n")
+            out_dir = tmp_path / "analysis"
+
+            res_neg = run_analyzer(source_path, out_dir, ["-d", "-w", "1", "-w", "2", "-w", "3", "-w", "4", "-w", "5", "-w", "6", "-w", "7"])
+            self.assertNotEqual(res_neg.returncode, 0)
+            self.assertIn("Unsafe Return Dereference", res_neg.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

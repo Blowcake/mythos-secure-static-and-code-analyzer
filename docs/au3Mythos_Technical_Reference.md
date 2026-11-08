@@ -65,7 +65,7 @@ The routing matrix is configured via `config.json` located in the active wrapper
   "rules": [
     {
       "caller_name": "SciTE.exe",
-      "path_prefix": "D:\\AIWorkspace",
+      "path_prefix": "D:\\Workspace",
       "action": "mythos",
       "config": "default_mythos"
     },

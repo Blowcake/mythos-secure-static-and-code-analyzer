@@ -71,9 +71,9 @@ For the wrapper (`Au3Check_Wrapper.au3`), settings GUI (`au3Mythos_Settings.au3`
 All public AutoIt UDF functions must have a standard Doxygen-compatible comment header block:
 ```autoit
 ; #FUNCTION# ====================================================================================================================
-; Name...........: _MCP_FunctionName
+; Name...........: _Mythos_FunctionName
 ; Description ...: Summary of what the function does.
-; Syntax.........: _MCP_FunctionName($sParam1[, $iParam2 = 0])
+; Syntax.........: _Mythos_FunctionName($sParam1[, $iParam2 = 0])
 ; Parameters ....: $sParam1 - Purpose of the first parameter.
 ;                  $iParam2 - Purpose of the second parameter.
 ; Return values .: True on success, False on failure and sets:
@@ -127,5 +127,5 @@ Update documentation in the same change when behavior, public APIs, or release n
 
 Common documentation targets:
 - `README.md` for project overview, public modules, and common workflows.
-- `docs\AutoIt_Syntax_Checker_Mythos_JSON_API.md` for API specifications, JSON schema, and IDE integration details.
+- `docs\au3Mythos_JSON_API.md` for API specifications, JSON schema, and IDE integration details.
 - `CHANGELOG.md` for release-facing changes.

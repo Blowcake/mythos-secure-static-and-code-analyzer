@@ -19,8 +19,9 @@ ORIGINAL_DAT_PATH = Path(r"C:\Program Files (x86)\AutoIt3\Au3Check.dat")
 class WrapperE2ETests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # 1. Back up config.json
-        cls.config_backup = CONFIG_JSON.read_text(encoding="utf-8")
+        # 1. Back up config.json (both raw bytes for exact restore and decoded text for json.loads)
+        cls.config_backup_bytes = CONFIG_JSON.read_bytes()
+        cls.config_backup = cls.config_backup_bytes.decode("utf-8")
         
         # 2. Make sure Au3Check_Original.exe and .dat exist in tools_wrapper for local fallback testing
         cls.orig_exe_backup = PROJECT_ROOT / "tools_wrapper" / "Au3Check_Original.exe"
@@ -52,8 +53,8 @@ class WrapperE2ETests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Restore config.json
-        CONFIG_JSON.write_text(cls.config_backup, encoding="utf-8")
+        # Restore config.json with original line endings intact
+        CONFIG_JSON.write_bytes(cls.config_backup_bytes)
         
         # Clean up copied files
         if cls.copied_exe and cls.orig_exe_backup.exists():

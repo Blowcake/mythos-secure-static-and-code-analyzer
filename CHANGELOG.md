@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.2 - 2026-11-08
+
+### Fixed
+
+- **Zero-False-Positive Hardening across Large UDF & Codebase Audits (`autoit_windows_x64_scoping_analyzer.py`)**:
+  - **1D `UBound($arr) > 0` Bounds Guard**: `Array Subscript Out of Bounds` unterdrückt Zugriffe auf Index `0` (bzw. unterhalb der geprüften Schranke) bei 0-initialisierten Arrays (`Global $g_aDirs[0]`, `Local $aEmpty[0]`), wenn der Zugriff durch einen expliziten `If UBound($arr) > 0`- oder `If UBound($arr, 1) >= 1`-Block (auch in `ElseIf`-Zweigen) geschützt ist.
+  - **Infallible Built-in & Standard Array Returns (`KNOWN_ARRAY_FUNCS`)**: `WinList` (2D) und `_PathSplit` (1D) als garantiert Array-liefernde Funktionen ergänzt, sodass direkte Zugriffe wie `$aWinList[0][0]` kein False-Positive `Unsafe Return Dereference` mehr auslösen.
+  - **Statische Erkennung garantiert fehlerfreier Helper-UDFs (`infallible_map_funcs`, `infallible_array_funcs`, `infallible_array_dims`)**: Ein Fixpunkt-Pre-Pass über alle im Skriptbaum enthaltenen UDFs erkennt unabhängig von der Funktionsreihenfolge solche Funktionen, die auf sämtlichen `Return`-Pfaden ohne `SetError` und ohne skalare Überschreibung ein lokal deklariertes Map (`Local $m[]`) oder ein dimensioniertes Array (`Local $a[...]`, inkl. 2D/3D-Dimensionsrang) zurückgeben, und nimmt deren Rückgabewerte von `Unsafe Return Dereference` aus.
+  - **`MapExists` / `_MapExists` als Map-Guard ohne Verschlucken des Key-Ausdrucks**: `MapExists($m, ...)` validiert `$m` als Map, lässt aber das zweite Argument (den Key-Ausdruck) für die Dereferenzierungsprüfung sichtbar.
+  - **Lesezugriffe in Array-Dimensionsklammern (`-w 5` Unused Variable)**: Variablen, die ausschließlich als Dimensionsausdruck einer lokalen Array-Deklaration verwendet werden (`Local $iCount = ...` gefolgt von `Local $aTools[$iCount]`), werden nun analog zu `ReDim` als Lesezugriff in `reference_code_parts` erfasst.
+  - **Kein False-Positive `Unsafe Return Dereference` bei RHS-Zugriffen derselben Zuweisungszeile**: Bei Selbstzuweisungen wie `$oItem = _OL_ItemMove($oOL, $oItem, $oItem.Parent.StoreID, $vFolder)` wird der vor dem Funktionsaufruf ausgewertete Argumentzugriff `$oItem.Parent.StoreID` auf derselben Zeile (`ln`) nicht mehr fälschlich als ungeprüfter Dereferenzierungszugriff auf den Rückgabewert von `_OL_ItemMove` gewertet.
+
+### Tests
+
+- Regressionstest `test_ubound_guard_infallible_helpers_and_array_dim_reference_no_false_positives` in `tests/test_warning_fixtures.py` ergänzt.
+
 ## 1.2.1 - 2026-11-07
 
 ### Fixed

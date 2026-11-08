@@ -130,7 +130,7 @@ The root level of the JSON payload is a dictionary containing a `summary` object
 
 ## 5. Rule-Specific Rich Metadata (`details`)
 
-The `details` object is dynamically populated by the `au3Mythos` scoping engine with high-value context to aid automated repair tools, MCP servers, and IDE integrations.
+The `details` object is dynamically populated by the `au3Mythos` scoping engine with high-value context to aid automated repair tools, CI pipelines, and IDE integrations.
 
 ### 5.1 Duplicate Declaration
 Fired when a variable is declared again in the same scope.

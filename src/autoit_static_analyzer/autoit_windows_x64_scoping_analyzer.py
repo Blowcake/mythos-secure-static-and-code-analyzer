@@ -11,7 +11,7 @@ import re
 import sys
 import urllib.parse
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 # Default AutoIt standard include directory
 AUTOIT_STD_INCLUDE = r"C:\Program Files (x86)\AutoIt3\Include"
@@ -811,6 +811,9 @@ class AutoItScopingAnalyzer:
         self.seterror_return_funcs = set()
         self.seterror_value_passthrough_funcs = set()
         self.setextended_return_funcs = set()
+        self.infallible_array_funcs = set()
+        self.infallible_array_dims = {}
+        self.infallible_map_funcs = set()
         self.byref_param_positions = {}
         self.function_return_constants = {}
         self.experimental_checks = experimental_checks
@@ -1058,7 +1061,7 @@ class AutoItScopingAnalyzer:
         warned_unreachable = False
         pending_error_var = None
         com_error_handler_active = False
-        type_check_rx = re.compile(r'(?i)is(?:array|obj|map)\s*\(\s*(\$\w+)\s*\)')
+        type_check_rx = re.compile(r'(?i)\b(?:is(?:array|obj|map)\s*\(\s*(\$\w+)\s*\)|_?mapexists\s*\(\s*(\$\w+)\s*,)')
         deref_rx = re.compile(r'(\$\w+)(?:\[|\.\w+)')
         func_call_rx = re.compile(r'\b(?:[a-zA-Z_]\w*\.)*([a-zA-Z_]\w*)\s*\(')
 
@@ -1071,9 +1074,9 @@ class AutoItScopingAnalyzer:
         UTILITY_FUNCS = {'ubound', 'stringlen', 'isarray', 'isobj', 'ismap', 'vargettype', 'consolewrite', 'stringreplace', 'log', 'abs', 'round', 'int', 'number', 'string', '_log', '_debugout', '_logmessage', '_msgbox', 'msgbox'}
         ERROR_STATUS_PRIMARY_FUNCS = {'dllcall', 'dllcalladdress'}
         EXTENDED_STATUS_PRIMARY_FUNCS = {'filefindnextfile', 'stringreplace'}
-        KNOWN_ARRAY_FUNCS = {'_aoauth_crackurl', '_budget_createdefaultconfig', '_budget_createdefaultstate', '_budget_loadconfig', '_budget_loadstate', '_crypto_generatepkce', '_date_time_dosdatetoarray', '_date_time_dosdatetimetoarray', '_date_time_dostimetoarray', '_date_time_gettimezoneinformation', '_date_time_systemtimetoarray', '_daysinmonth', '_gcli_auth_generatepkce', '_json_parse', '_mapkeys', '_provider_readconfigmap', '_session_buildcontextfingerprint', '_session_create', '_winapi_getsysteminfo', '_winapi_structtoarray', '_winhttpcrackurl', '_winhttpsimpleformfill_setuploadcallback', 'filereadtoarray', 'guigetmsg', 'mapkeys', 'mousegetpos', 'processlist', 'stringtoasciiarray', 'stringregexp', 'stringsplit', 'wingetpos', 'wingetclientsize', 'controlgetpos', 'dllcall', 'dllcalladdress'}
-        KNOWN_MAP_FUNCS = {'_json_parse'}
-        KNOWN_ARRAY_DIMS = {'processlist': (None, None)}
+        KNOWN_ARRAY_FUNCS = {'_aoauth_crackurl', '_budget_createdefaultconfig', '_budget_createdefaultstate', '_budget_loadconfig', '_budget_loadstate', '_crypto_generatepkce', '_date_time_dosdatetoarray', '_date_time_dosdatetimetoarray', '_date_time_dostimetoarray', '_date_time_gettimezoneinformation', '_date_time_systemtimetoarray', '_daysinmonth', '_gcli_auth_generatepkce', '_json_parse', '_mapkeys', '_pathsplit', '_provider_readconfigmap', '_session_buildcontextfingerprint', '_session_create', '_winapi_getsysteminfo', '_winapi_structtoarray', '_winhttpcrackurl', '_winhttpsimpleformfill_setuploadcallback', 'filereadtoarray', 'guigetmsg', 'mapkeys', 'mousegetpos', 'processlist', 'stringtoasciiarray', 'stringregexp', 'stringsplit', 'wingetpos', 'wingetclientsize', 'winlist', 'controlgetpos', 'dllcall', 'dllcalladdress'} | self.infallible_array_funcs
+        KNOWN_MAP_FUNCS = {'_json_parse'} | self.infallible_map_funcs
+        KNOWN_ARRAY_DIMS = {'processlist': (None, None), 'winlist': (None, None), **self.infallible_array_dims}
         KNOWN_OBJECT_FUNCS = {'objcreate'}
         KNOWN_STRUCT_FUNCS = {'dllstructcreate'}
 
@@ -1128,8 +1131,11 @@ class AutoItScopingAnalyzer:
         def get_current_guards():
             guards = []
             for item in stack:
-                if item[0] == 'if' and len(item) > 3 and item[3]:
-                    guards.append(item[3])
+                if item[0] == 'if':
+                    if len(item) > 3 and item[3]:
+                        guards.append(item[3])
+                    if len(item) > 5 and isinstance(item[5], str) and item[5]:
+                        guards.append(item[5])
             return tuple(guards)
 
         def get_current_raw_guards():
@@ -1707,7 +1713,8 @@ class AutoItScopingAnalyzer:
                 mark_current_branch_terminal()
             
             # 1. Type checks (e.g. IsArray($var)) satisfy type safety
-            for var in type_check_rx.findall(code_no_strings):
+            for m_tc in type_check_rx.finditer(code_no_strings):
+                var = m_tc.group(1) or m_tc.group(2)
                 var_lower = var.lower()
                 if var_lower in unsafe_assigns:
                     del unsafe_assigns[var_lower]
@@ -1807,6 +1814,13 @@ class AutoItScopingAnalyzer:
                         del unsafe_assigns[var_lower]
                     if pending_error_var == var_lower:
                         pending_error_var = None
+                elif func_lower in KNOWN_MAP_FUNCS:
+                    map_vars.add(var_lower)
+                    map_known_keys.setdefault(var_lower, set()).add('*')
+                    if var_lower in unsafe_assigns:
+                        del unsafe_assigns[var_lower]
+                    if pending_error_var == var_lower:
+                        pending_error_var = None
                 elif func_lower in KNOWN_OBJECT_FUNCS:
                     object_assigns[var_lower] = (ln, func_name_called)
                     if var_lower in unsafe_assigns:
@@ -1850,7 +1864,7 @@ class AutoItScopingAnalyzer:
             has_real_call = False
             for c_name in calls:
                 c_lower = c_name.lower()
-                if c_lower in ('isarray', 'isobj', 'ismap'):
+                if c_lower in ('isarray', 'isobj', 'ismap', 'mapexists', '_mapexists'):
                     continue
                 has_real_call = True
                 if not in_error_guard_path:
@@ -1889,7 +1903,7 @@ class AutoItScopingAnalyzer:
             deref_scan_code = type_check_rx.sub('', code_no_strings)
             for var in deref_rx.findall(deref_scan_code):
                 var_lower = var.lower()
-                if var_lower in object_assigns:
+                if var_lower in object_assigns and object_assigns[var_lower][0] != ln:
                     func_called = object_assigns[var_lower][1]
                     if not (com_error_handler_active and func_called.lower() == 'objcreate'):
                         add_warning(
@@ -1899,7 +1913,7 @@ class AutoItScopingAnalyzer:
                             ln
                         )
                     del object_assigns[var_lower]
-                if var_lower in unsafe_assigns:
+                if var_lower in unsafe_assigns and unsafe_assigns[var_lower][0] != ln:
                     orig_file, orig_ln = line_mappings[ln - 1]
                     func_called = unsafe_assigns[var_lower][1]
                     self.warnings.append({
@@ -2000,16 +2014,20 @@ class AutoItScopingAnalyzer:
             # ElseIf / Else
             m_elseif = re.match(r'(?i)^\s*(elseif\s|else\b)', stripped)
             if m_elseif:
+                elseif_guard = None
                 if stripped_lower.startswith('elseif'):
                     elseif_condition = re.sub(r'(?i)^\s*ElseIf\s+', '', split_code_comment(stripped)[0])
                     elseif_condition = re.sub(r'(?i)\s+Then\s*$', '', elseif_condition)
                     collect_clause_references(elseif_condition, ln, line)
+                    elseif_guard = re.sub(r'\s+', ' ', elseif_condition.strip().lower()) or None
                 if stack and stack[-1][0] == 'if':
                     sub_blocks = stack[-1][2]
                     if sub_blocks:
                         sub_blocks[-1][1] = ln - 1
                     kind = 'else' if re.match(r'(?i)^\s*else\b', stripped) else 'elseif'
                     sub_blocks.append([ln, None, kind, set()])
+                    if len(stack[-1]) > 5:
+                        stack[-1][5] = elseif_guard
                 continue
 
             # Case
@@ -2106,6 +2124,9 @@ class AutoItScopingAnalyzer:
                             reference_code_parts.append('='.join(assignment_parts[1:]))
                         var_lower, dims = self.parse_array_dimensions(left)
                         if var_lower:
+                            left_stripped = left.strip()
+                            if len(left_stripped) > len(var_lower):
+                                reference_code_parts.append(left_stripped[len(var_lower):])
                             if is_static_decl:
                                 static_vars.add(var_lower)
                             prior_duplicate_decls = [d for d in declarations.get(var_lower, []) if d[0] != ln and not declaration_path_terminates(d)]
@@ -2504,11 +2525,18 @@ class AutoItScopingAnalyzer:
                                 matching_dims = dims
                                 break
                         if matching_dims:
+                            var_rx = re.escape(ref_var)
+                            ubound_pos_rx = rf'(?i)\bubound\s*\(\s*{var_rx}\s*(?:,\s*1\s*)?\)\s*(?:>\s*0|>=?\s*1|<>\s*0)'
+                            is_ubound_guarded = bool(re.search(ubound_pos_rx, code_no_strings)) or any(
+                                re.search(ubound_pos_rx, g) for g in get_current_guards()
+                            )
                             # 1D bounds check
                             if access_dims == 1:
                                 if g2.isdigit() or (g2.startswith("-") and g2[1:].isdigit()):
                                     idx = int(g2)
                                     size = matching_dims[0]
+                                    if size == 0 and idx == 0 and is_ubound_guarded:
+                                        size = None
                                     if size is not None and (idx >= size or idx < 0):
                                         orig_file, orig_ln = line_mappings[ln - 1]
                                         self.warnings.append({
@@ -2550,7 +2578,7 @@ class AutoItScopingAnalyzer:
 
             # Block Start checks
             if self.is_multiline_if(line):
-                stack.append(('if', ln, [[ln, None, 'if', set()]], normalize_guard(line), raw_if_condition(line)))
+                stack.append(['if', ln, [[ln, None, 'if', set()]], normalize_guard(line), raw_if_condition(line), None])
             elif stripped_lower.startswith('switch '):
                 switch_expr = re.sub(r'(?i)^\s*switch\s+', '', split_code_comment(stripped)[0]).strip()
                 stack.append(['switch', ln, [], simple_var_expr(switch_expr), {}, set(), {}])
@@ -3937,6 +3965,10 @@ def main():
     in_func = False
     current_func = ""
     current_func_returns = []
+    current_func_return_exprs = []
+    current_func_local_maps = set()
+    current_func_local_arrays = {}
+    func_return_summaries = {}
     current_func_error_passthrough_params = set()
     current_func_error_passthrough_vars = set()
     current_func_has_error_value_passthrough_return = False
@@ -3945,6 +3977,7 @@ def main():
 
     def record_function_return(return_expr):
         nonlocal current_func_has_error_value_passthrough_return, current_func_has_setextended_return
+        current_func_return_exprs.append(return_expr.strip())
         m_seterror = re.match(r'(?i)^\s*SetError\s*\((.*)\)', return_expr)
         if m_seterror:
             seterror_args = split_top_level(m_seterror.group(1), ',')
@@ -3975,6 +4008,9 @@ def main():
             in_func = True
             current_func = func_sig[0].lower()
             current_func_returns = []
+            current_func_return_exprs = []
+            current_func_local_maps = set()
+            current_func_local_arrays = {}
             current_func_error_passthrough_params = set()
             current_func_error_passthrough_vars = set()
             current_func_has_error_value_passthrough_return = False
@@ -3999,9 +4035,18 @@ def main():
                 analyzer.setextended_return_funcs.add(current_func)
             if current_func and current_func_return_constants:
                 analyzer.function_return_constants[current_func] = set(current_func_return_constants)
+            if current_func and current_func_return_exprs:
+                func_return_summaries[current_func] = (
+                    list(current_func_return_exprs),
+                    set(current_func_local_maps),
+                    dict(current_func_local_arrays),
+                )
             in_func = False
             current_func = ""
             current_func_returns = []
+            current_func_return_exprs = []
+            current_func_local_maps = set()
+            current_func_local_arrays = {}
             current_func_error_passthrough_params = set()
             current_func_error_passthrough_vars = set()
             current_func_has_error_value_passthrough_return = False
@@ -4012,6 +4057,21 @@ def main():
             alias_line = stripped
             if first_keyword in {'local', 'global', 'dim', 'static'}:
                 alias_line = re.sub(r'(?i)^\s*(Local|Global|Dim|Static)\s+(?:Const\s+)?', '', stripped)
+                for decl_part in analyzer.split_declaration_parts(alias_line):
+                    decl_left = split_assignment_left(decl_part).strip()
+                    if re.match(r'^\$\w+\s*\[\s*\]$', decl_left):
+                        current_func_local_maps.add(re.match(r'^(\$\w+)', decl_left).group(1).lower())
+                    else:
+                        v_low, v_dims = analyzer.parse_array_dimensions(decl_left)
+                        if v_low and isinstance(v_dims, tuple):
+                            current_func_local_arrays[v_low] = (None,) * len(v_dims)
+            else:
+                stmt_after_then = re.sub(r'(?i)^.*?\bThen\s+', '', stripped) if 'then' in stripped_lower and stripped_lower.startswith(('if ', 'elseif ')) else stripped
+                m_bare_assign = re.match(r'^(\$\w+)\s*(?:\+|-|\*|/|&)?=(?!=)', stmt_after_then)
+                if m_bare_assign:
+                    reassigned_var = m_bare_assign.group(1).lower()
+                    current_func_local_maps.discard(reassigned_var)
+                    current_func_local_arrays.pop(reassigned_var, None)
             m_alias = re.match(r'(?i)^\s*(\$\w+)\s*=\s*(\$\w+)\s*$', alias_line) if alias_line.lstrip().startswith('$') else None
             if m_alias and m_alias.group(2).lower() in current_func_error_passthrough_vars:
                 current_func_error_passthrough_vars.add(m_alias.group(1).lower())
@@ -4155,6 +4215,45 @@ def main():
                             'file': orig_file,
                             'line': orig_ln
                         })
+    while True:
+        progress = False
+        for fn, (ret_exprs, local_maps, local_arrays) in func_return_summaries.items():
+            if fn in analyzer.infallible_map_funcs or fn in analyzer.infallible_array_funcs:
+                continue
+            all_ret_maps = True
+            all_ret_arrays = True
+            array_dim_set = set()
+            for ret_expr in ret_exprs:
+                m_ret_var = re.match(r'^\s*(\$\w+)\s*$', ret_expr)
+                m_ret_call = re.match(r'^\s*([A-Za-z_]\w*)\s*\(', ret_expr)
+                if m_ret_var:
+                    rv = m_ret_var.group(1).lower()
+                    if rv not in local_maps:
+                        all_ret_maps = False
+                    if rv not in local_arrays:
+                        all_ret_arrays = False
+                    else:
+                        array_dim_set.add(local_arrays[rv])
+                elif m_ret_call:
+                    rc = m_ret_call.group(1).lower()
+                    if rc not in analyzer.infallible_map_funcs:
+                        all_ret_maps = False
+                    if rc not in analyzer.infallible_array_funcs:
+                        all_ret_arrays = False
+                    else:
+                        array_dim_set.add(analyzer.infallible_array_dims.get(rc))
+                else:
+                    all_ret_maps = False
+                    all_ret_arrays = False
+            if all_ret_maps:
+                analyzer.infallible_map_funcs.add(fn)
+                progress = True
+            elif all_ret_arrays:
+                analyzer.infallible_array_funcs.add(fn)
+                analyzer.infallible_array_dims[fn] = next(iter(array_dim_set)) if len(array_dim_set) == 1 else None
+                progress = True
+        if not progress:
+            break
     print(f"Indexed {len(global_vars)} global variables.")
 
     # 4. Analyze Scoping & Variable Definitions

@@ -1337,7 +1337,7 @@ Func ShowAboutDialog()
     GUICtrlSetFont(-1, 16, 800, 0, "Segoe UI")
     GUICtrlSetColor(-1, 0x1A73E8)
     
-    GUICtrlCreateLabel("Version 1.2.1", 20, 50, 380, 20)
+    GUICtrlCreateLabel("Version 1.2.2", 20, 50, 380, 20)
     GUICtrlSetFont(-1, 10, 400, 0, "Segoe UI")
     GUICtrlSetColor(-1, 0x666666)
     
