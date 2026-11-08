@@ -274,6 +274,19 @@ class WrapperE2ETests(unittest.TestCase):
             self.assertEqual(data["preprocessed_line"], 2)
             self.assertEqual(data["line"], 2)
             self.assertEqual(data["code"], "Local $x = 42")
+
+            # Run compiled JSON lookup (stripping comments and #include-once)
+            test_file.write_text("#include-once\n; Line 2 comment\n\nLocal $x = 42\n", encoding="utf-8")
+            res_compiled = subprocess.run(
+                [str(WRAPPER_EXE), "-lookup_runtime_line", "1", "-compiled", "-json_out", str(test_file)],
+                capture_output=True,
+                text=True,
+                env=env
+            )
+            data_compiled = json.loads(res_compiled.stdout.strip())
+            self.assertEqual(data_compiled["preprocessed_line"], 1)
+            self.assertEqual(data_compiled["line"], 4)
+            self.assertEqual(data_compiled["code"], "Local $x = 42")
         finally:
             if test_file.exists():
                 test_file.unlink()

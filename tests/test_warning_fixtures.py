@@ -2606,6 +2606,35 @@ class Au3CheckLegacyWarningsTests(unittest.TestCase):
             self.assertEqual(res_w2.returncode, 1)
             self.assertIn("#comments-start has no explicit closing #comments-end", res_w2.stdout)
 
+    def test_sibling_branch_assignment_without_local_is_block_scoping_error(self):
+        source = """
+        Opt("MustDeclareVars", 1)
+
+        Func _Probe($bOut, $bErr)
+            If $bOut Then
+                Local $sNext = "stdout"
+                If $sNext <> "" Then ConsoleWrite($sNext)
+            EndIf
+            If $bErr Then
+                $sNext = "stderr"
+                If $sNext <> "" Then ConsoleWrite($sNext)
+            EndIf
+            Local $sNorm = StringReplace("a)b", ")", "")
+            Return $sNorm
+        EndFunc
+        """
+        with make_temp_dir("test_sibling_block_scope_") as tmp:
+            tmp_path = Path(tmp)
+            source_path = tmp_path / "main.au3"
+            source_path.write_text(normalize_source(source), encoding="utf-8", newline="\r\n")
+            out_dir = tmp_path / "analysis"
+
+            res = run_analyzer(source_path, out_dir, ["-d", "-w", "1", "-w", "2", "-w", "3", "-w", "4", "-w", "5", "-w", "6", "-w", "7"])
+            self.assertEqual(res.returncode, 2, (res.stdout or "") + (res.stderr or ""))
+            self.assertNotIn("StringReplace() [built-in] called with wrong number of args", res.stdout)
+            self.assertIn("error: Declared inside block", res.stdout)
+            self.assertIn('$sNext = "stderr"', res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

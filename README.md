@@ -22,7 +22,14 @@
 
 ---
 
-### Major Update (v1.2.0)
+### Major Update (v1.2.1)
+
+* **Strict-Mode LHS & Conditional `Local` Scoping Hardening**: Direct variable assignments without a declaration keyword (`$var = ...`, `$arr[$i] = ...`, `If ... Then $var = ...`) are now validated as scoping references against visible declaration scopes. Conditional `Local` declarations inside one `If`/`Case` branch that are assigned without `Local` in a sibling or subsequent block are deterministically caught on the assignment line as `Block Scoping Bug`, `Reference Before Declaration`, or `Undeclared Variable`.
+* **Dimension-Agnostic `IsArray` Guard & Visible-Scope Type Updates**: `IsArray($v)` guards register multi-dimensional array compatibility without creating implicit function-scope declarations or false-positive `Array Dimension Mismatch` warnings on 2D arrays (`WinList()`, SQLite 2D tables).
+* **String-Aware Legacy Syntax Pass & Clean Global/Static Writes**: `collect_legacy_syntax_errors` ignores parentheses inside string literals (e.g. `StringReplace($s, ")", "")`) and emits valid JSON in `--json-out` mode; writes to `Global` and `Static` variables inside functions are no longer misclassified as function-local `Dead Store` warnings.
+* **Compiled Runtime Line Lookup (`--lookup-runtime-line <N> --compiled`)**: Strips `#include-once` directives, comment blocks (`#comments-start`/`#cs` .. `#comments-end`/`#ce`), comment lines, and blank lines identically to `Aut2Exe`, mapping compiled runtime crash lines directly back to the exact source file and line.
+
+### Previous Major Update (v1.2.0)
 
 * **False-Positive Hardening**: Robust refinements implemented based on detailed reports and test cases contributed by AspirinJunkie.
 * **Scoping Heuristics & Terminal Branches**: Complete resolution of cases A–J alongside path-sensitive variable declaration checks (e.g. `Local $iErr` in `JSON.au3` terminal branches).

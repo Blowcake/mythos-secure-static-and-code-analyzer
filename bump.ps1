@@ -65,49 +65,49 @@ switch ($Type) {
 
 $newVersion = "$major.$minor.$patch"
 $config.version = $newVersion
-Set-Content -Path $jsonPath -Value ($config | ConvertTo-Json -Depth 10)
+Set-Content -Path $jsonPath -Value (($config | ConvertTo-Json -Depth 10).TrimEnd("`r", "`n") + "`r`n") -NoNewline
 
 if (Test-Path $pyprojectPath) {
     $text = Get-Content $pyprojectPath -Raw
     $text = [regex]::Replace($text, '(?m)^version\s*=\s*".*"', "version = `"$newVersion`"")
-    Set-Content -Path $pyprojectPath -Value $text
+    Set-Content -Path $pyprojectPath -Value ($text.TrimEnd("`r", "`n") + "`r`n") -NoNewline
 }
 
 if (Test-Path $initPath) {
     $text = Get-Content $initPath -Raw
     $text = [regex]::Replace($text, '__version__\s*=\s*".*"', "__version__ = `"$newVersion`"")
-    Set-Content -Path $initPath -Value $text
+    Set-Content -Path $initPath -Value ($text.TrimEnd("`r", "`n") + "`r`n") -NoNewline
 }
 
 if (Test-Path $doxyPath) {
     $text = Get-Content $doxyPath -Raw
     $text = [regex]::Replace($text, '(?m)^PROJECT_NUMBER\s*=.*$', "PROJECT_NUMBER         = `"$newVersion`"")
-    Set-Content -Path $doxyPath -Value $text
+    Set-Content -Path $doxyPath -Value ($text.TrimEnd("`r", "`n") + "`r`n") -NoNewline
 }
 
 if (Test-Path $analyzerPath) {
     $text = Get-Content $analyzerPath -Raw
     $text = [regex]::Replace($text, '__version__\s*=\s*".*"', ('__version__ = "' + $newVersion + '"'))
-    Set-Content -Path $analyzerPath -Value $text
+    Set-Content -Path $analyzerPath -Value ($text.TrimEnd("`r", "`n") + "`r`n") -NoNewline
 }
 
 if (Test-Path $settingsPath) {
     $text = Get-Content $settingsPath -Raw
     $text = [regex]::Replace($text, '(?i)"Version \d+\.\d+\.\d+"', ('"Version ' + $newVersion + '"'))
-    Set-Content -Path $settingsPath -Value $text
+    Set-Content -Path $settingsPath -Value ($text.TrimEnd("`r", "`n") + "`r`n") -NoNewline
 }
 
 if (Test-Path $setupPath) {
     $text = Get-Content $setupPath -Raw
     $text = [regex]::Replace($text, '(?i)"Version \d+\.\d+\.\d+"', ('"Version ' + $newVersion + '"'))
     $text = [regex]::Replace($text, '(?i)"DisplayVersion"\s*,\s*"REG_SZ"\s*,\s*"\d+\.\d+\.\d+"', ('"DisplayVersion", "REG_SZ", "' + $newVersion + '"'))
-    Set-Content -Path $setupPath -Value $text
+    Set-Content -Path $setupPath -Value ($text.TrimEnd("`r", "`n") + "`r`n") -NoNewline
 }
 
 if (Test-Path $uninstallPath) {
     $text = Get-Content $uninstallPath -Raw
     $text = [regex]::Replace($text, '(?i)"Version \d+\.\d+\.\d+"', ('"Version ' + $newVersion + '"'))
-    Set-Content -Path $uninstallPath -Value $text
+    Set-Content -Path $uninstallPath -Value ($text.TrimEnd("`r", "`n") + "`r`n") -NoNewline
 }
 
 

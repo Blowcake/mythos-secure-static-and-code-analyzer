@@ -11,7 +11,7 @@ import re
 import sys
 import urllib.parse
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 # Default AutoIt standard include directory
 AUTOIT_STD_INCLUDE = r"C:\Program Files (x86)\AutoIt3\Include"
@@ -1028,6 +1028,8 @@ class AutoItScopingAnalyzer:
         stack = []
         declarations = {} # var_name -> [(preprocessed_line_num, block_range, is_const, dims, guards)]
         references = [] # (preprocessed_line_num, var_name, original_text, guards)
+        lhs_assign_refs = [] # (preprocessed_line_num, var_name, original_text, guards)
+        static_vars = set()
         global_numeric_consts = global_numeric_consts or set()
 
         # Unsafe dereference checks initializers
@@ -1285,12 +1287,26 @@ class AutoItScopingAnalyzer:
                 return "scalar"
             return None
 
+        def visible_declaration_scope(var_lower, ln):
+            if var_lower not in declarations:
+                return False, None
+            visible = [
+                d for d in declarations[var_lower]
+                if d[0] <= ln and declaration_visible(d, ln, get_current_guards())
+            ]
+            if not visible:
+                return False, None
+            if any(d[1] is None for d in visible):
+                return True, None
+            return True, get_current_block_range(ln)
+
         def record_scalar_assignment_type(var_lower, ln, rhs_text):
             dims = scalar_assignment_dims(rhs_text)
             if dims is None:
                 return
-            if var_lower in declarations:
-                self.register_declaration(declarations, var_lower, ln, get_current_block_range(ln), False, dims, get_current_guards())
+            is_vis, scope_range = visible_declaration_scope(var_lower, ln)
+            if is_vis:
+                self.register_declaration(declarations, var_lower, ln, scope_range, False, dims, get_current_guards())
             elif var_lower in global_vars:
                 register_global_var(global_vars, var_lower, global_vars[var_lower][0], dims)
 
@@ -1698,7 +1714,9 @@ class AutoItScopingAnalyzer:
                     if pending_error_var == var_lower:
                         pending_error_var = None
                     if var_lower not in global_vars:
-                        self.register_declaration(declarations, var_lower, ln, None, False, (None,), get_current_guards())
+                        is_vis, scope_range = visible_declaration_scope(var_lower, ln)
+                        if is_vis:
+                            self.register_declaration(declarations, var_lower, ln, scope_range, False, None, get_current_guards())
                 if var_lower in object_assigns:
                     del object_assigns[var_lower]
                 unchecked_array_results.pop(var_lower, None)
@@ -1779,7 +1797,11 @@ class AutoItScopingAnalyzer:
                     if var_lower in global_vars:
                         register_global_var(global_vars, var_lower, global_vars[var_lower][0], known_dims)
                     else:
-                        self.register_declaration(declarations, var_lower, ln, None, False, known_dims, get_current_guards())
+                        is_vis, scope_range = visible_declaration_scope(var_lower, ln)
+                        if is_vis:
+                            self.register_declaration(declarations, var_lower, ln, scope_range, False, known_dims, get_current_guards())
+                        elif re.match(r'(?i)^\s*(?:If\s+.+?\s+Then\s+)?(?:Static\s+)?(?:Local|Dim|Static)\b', stripped):
+                            self.register_declaration(declarations, var_lower, ln, get_current_block_range(ln), False, known_dims, get_current_guards())
                     # Clear from unsafe assignments
                     if var_lower in unsafe_assigns:
                         del unsafe_assigns[var_lower]
@@ -2071,6 +2093,7 @@ class AutoItScopingAnalyzer:
                 reference_code_parts = [inline_decl.group(1)] if inline_decl else []
                 scope = m_decl.group(2).lower()
                 is_const = declaration_has_const(stripped)
+                is_static_decl = bool(m_decl.group(1)) or scope == 'static' or re.search(r'(?i)\bStatic\b', split_code_comment(stripped)[0]) is not None
                 if scope in ('local', 'dim', 'static'):
                     vars_part = split_code_comment(m_decl.group(3))[0]
                     current_range = get_current_block_range(ln)
@@ -2083,6 +2106,8 @@ class AutoItScopingAnalyzer:
                             reference_code_parts.append('='.join(assignment_parts[1:]))
                         var_lower, dims = self.parse_array_dimensions(left)
                         if var_lower:
+                            if is_static_decl:
+                                static_vars.add(var_lower)
                             prior_duplicate_decls = [d for d in declarations.get(var_lower, []) if d[0] != ln and not declaration_path_terminates(d)]
                             if self.warnings_config.get(3, False) and scope != 'dim' and dims == "scalar" and prior_duplicate_decls:
                                 orig_file, orig_ln = line_mappings[ln - 1]
@@ -2198,16 +2223,18 @@ class AutoItScopingAnalyzer:
                                     ln
                                 )
                             if var_lower in declarations:
-                                self.register_declaration(declarations, var_lower, ln, get_current_block_range(ln), False, dims, get_current_guards())
+                                is_vis, scope_range = visible_declaration_scope(var_lower, ln)
+                                self.register_declaration(declarations, var_lower, ln, scope_range if is_vis else get_current_block_range(ln), False, dims, get_current_guards())
                             elif var_lower in global_vars:
                                 register_global_var(global_vars, var_lower, global_vars[var_lower][0], dims)
 
                 # Check for direct assignment to see if we're assigning to a Constant
-                m_assign = re.match(r'^\s*(\$\w+)\s*((?:\+|-|\*|/|&)?=)\s*(.*)', split_code_comment(stripped)[0])
+                m_assign = None if m_redim else re.match(r'^\s*(\$\w+)\s*((?:\+|-|\*|/|&)?=)\s*(.*)', split_code_comment(stripped)[0])
                 if m_assign:
                     assign_var = m_assign.group(1).lower()
                     assign_op = m_assign.group(2)
                     assign_rhs = split_code_comment(m_assign.group(3))[0]
+                    lhs_assign_refs.append((ln, assign_var, line, get_current_guards()))
                     is_accumulator_init = is_self_concat_initializer(assign_var, assign_op, assign_rhs)
                     if assign_op == '=':
                         reference_code_parts = [strip_self_accumulator_read(assign_var, assign_op, assign_rhs) if is_accumulator_init else assign_rhs]
@@ -2249,15 +2276,19 @@ class AutoItScopingAnalyzer:
                                     for const_var in return_consts:
                                         by_case.setdefault(const_var, set()).add(dep_var)
                 else:
-                    m_index_assign = re.match(r'^\s*(\$\w+(?:\s*\[[^\]]+\])+)\s*((?:\+|-|\*|/|&)?=)\s*(.*)', split_code_comment(stripped)[0])
+                    m_index_assign = None if m_redim else re.match(r'^\s*(\$\w+(?:\s*\[[^\]]+\])+)\s*((?:\+|-|\*|/|&)?=)\s*(.*)', split_code_comment(stripped)[0])
                     if m_index_assign:
                         assign_lhs = m_index_assign.group(1)
                         assign_rhs = split_code_comment(m_index_assign.group(3))[0]
+                        m_idx_base = re.match(r'^\s*(\$\w+)', assign_lhs)
+                        if m_idx_base:
+                            lhs_assign_refs.append((ln, m_idx_base.group(1).lower(), line, get_current_guards()))
                         reference_code_parts = lhs_index_expressions(assign_lhs) + [assign_rhs]
 
                 for m_then_assign in re.finditer(r'(?i)\bIf\s+(.+?)\s+Then\s+(\$\w+)\s*(?:\+|-|\*|/|&)?=', stripped):
                     then_condition = m_then_assign.group(1).strip().lower()
                     then_var = m_then_assign.group(2).lower()
+                    lhs_assign_refs.append((ln, then_var, line, get_current_guards()))
                     assignment_lhs_vars.add(then_var)
                     if then_var in uninit_candidates:
                         maybe_uninitialized.add(then_var)
@@ -2385,7 +2416,7 @@ class AutoItScopingAnalyzer:
                     warned_uninitialized.add(var_lower)
 
             # Check array subscript references
-            subscript_rx = re.compile(r'(\$\w+)\[([^\]]+)\](?:\[([^\]]+)\])?')
+            subscript_rx = re.compile(r'(\$\w+)\[([^\[\]]+)\](?:\[([^\[\]]+)\])?')
             for m_sub in subscript_rx.finditer(code_no_strings):
                 ref_var = m_sub.group(1).lower()
                 g2 = m_sub.group(2).strip()
@@ -2530,6 +2561,14 @@ class AutoItScopingAnalyzer:
 
         # Check scoping violations and completely undeclared variables
         all_referenced_vars = set(ref_var for _, ref_var, _, _ in references)
+        scoping_references = []
+        seen_scoping_refs = set()
+        for ref_item in sorted(references + lhs_assign_refs, key=lambda item: item[0]):
+            ref_key = (ref_item[0], ref_item[1])
+            if ref_key not in seen_scoping_refs:
+                seen_scoping_refs.add(ref_key)
+                scoping_references.append(ref_item)
+        all_scoping_vars = set(ref_var for _, ref_var, _, _ in scoping_references)
 
         if self.experimental_checks and assignment_events:
             reads_by_var = {}
@@ -2540,7 +2579,7 @@ class AutoItScopingAnalyzer:
                 assignments_by_var.setdefault(assign_var, []).append((assign_ln, assign_kind))
             warned_dead_stores = set()
             for assign_var, events in assignments_by_var.items():
-                if assign_var not in declarations and assign_var not in global_vars:
+                if assign_var not in declarations or assign_var in global_vars or assign_var in static_vars:
                     continue
                 if assign_var in byref_param_vars:
                     continue
@@ -2572,7 +2611,7 @@ class AutoItScopingAnalyzer:
         # - Reference Before Declaration: A variable is referenced at a line number prior to its declaration.
         # - Block Scoping Bug: A variable is declared inside a specific block (like If/For/While) but referenced outside that block.
         for var, decls in declarations.items():
-            var_refs = [(ref_ln, ref_text, ref_guards) for ref_ln, ref_var, ref_text, ref_guards in references if ref_var == var]
+            var_refs = [(ref_ln, ref_text, ref_guards) for ref_ln, ref_var, ref_text, ref_guards in scoping_references if ref_var == var]
             for ref_ln, ref_text, ref_guards in var_refs:
                 satisfied = False
                 for decl in decls:
@@ -2628,7 +2667,7 @@ class AutoItScopingAnalyzer:
 
         # 2. Undeclared Variables Check
         # Reports variables that are referenced in code but never declared anywhere in local, global, or parameter scopes.
-        for ref_var in all_referenced_vars:
+        for ref_var in all_scoping_vars:
             if ref_var not in declarations and ref_var not in global_vars:
                 candidates = list(declarations.keys()) + list(global_vars.keys())
                 suggestions = []
@@ -2642,7 +2681,7 @@ class AutoItScopingAnalyzer:
                 if suggestions_list:
                     details_val = {"suggestions": suggestions_list}
                 
-                var_refs = [(ref_ln, ref_text) for ref_ln, ref_v, ref_text, _ in references if ref_v == ref_var]
+                var_refs = [(ref_ln, ref_text) for ref_ln, ref_v, ref_text, _ in scoping_references if ref_v == ref_var]
                 for ref_ln, ref_text in var_refs:
                     orig_ref_file, orig_ref_ln = line_mappings[ref_ln - 1]
                     self.warnings.append({
@@ -2988,12 +3027,13 @@ def collect_legacy_syntax_errors(file_path, lines=None, line_mappings=None):
         m_func = re.match(r'(?i)^func\s+(\w+)\s*\(', code)
         if m_func:
             func_name_lower = m_func.group(1).lower()
-            open_pos = code.find('(', m_func.end() - 1)
+            code_no_str = replace_strings_with_placeholder(code)
+            open_pos = code_no_str.find('(', m_func.end() - 1)
             if open_pos >= 0:
                 depth = 1
                 params_str = ""
-                for idx_ch in range(open_pos + 1, len(code)):
-                    ch = code[idx_ch]
+                for idx_ch in range(open_pos + 1, len(code_no_str)):
+                    ch = code_no_str[idx_ch]
                     if ch == '(':
                         depth += 1
                     elif ch == ')':
@@ -3179,7 +3219,7 @@ def collect_legacy_syntax_errors(file_path, lines=None, line_mappings=None):
                     defined_funcs[func_name_lower] = (orig_file, orig_line)
             
             # Check for missing/extra commas in parameters list
-            m_func_decl = re.match(r'(?i)^\s*func\s+\w+\s*\(([^)]*)\)', code)
+            m_func_decl = re.match(r'(?i)^\s*func\s+\w+\s*\(([^)]*)\)', replace_strings_with_placeholder(code))
             if m_func_decl:
                 params_str = m_func_decl.group(1)
                 stripped_params = params_str.strip()
@@ -3308,10 +3348,10 @@ def collect_legacy_syntax_errors(file_path, lines=None, line_mappings=None):
             paren_start = m.end() - 1
             paren_end = -1
             paren_depth = 1
-            for j in range(paren_start + 1, len(code_raw)):
-                if code_raw[j] == '(':
+            for j in range(paren_start + 1, len(stripped_code)):
+                if stripped_code[j] == '(':
                     paren_depth += 1
-                elif code_raw[j] == ')':
+                elif stripped_code[j] == ')':
                     paren_depth -= 1
                     if paren_depth == 0:
                         paren_end = j
@@ -3746,6 +3786,26 @@ def main():
  
     if args.lookup_runtime_line is not None:
         target_line = args.lookup_runtime_line
+        if not args.compiled:
+            try:
+                import json
+                cfg_path = os.environ.get("MYTHOS_TEST_CONFIG") or os.path.join(os.environ.get("APPDATA", ""), "au3Mythos", "mythos_config", "config.json")
+                if cfg_path and os.path.exists(cfg_path):
+                    with open(cfg_path, "r", encoding="utf-8", errors="ignore") as cf:
+                        cfg_data = json.load(cf)
+                    recent = cfg_data.get("recent_callers", {})
+                    if isinstance(recent, dict) and recent:
+                        latest_entry = max(
+                            (v for v in recent.values() if isinstance(v, dict)),
+                            key=lambda v: str(v.get("last_called", "")),
+                            default=None,
+                        )
+                        if latest_entry:
+                            params_str = str(latest_entry.get("params", "")).lower()
+                            if f"-lookup_runtime_line {target_line}" in params_str and ("-compiled" in params_str or "--compiled" in params_str):
+                                args.compiled = True
+            except Exception:
+                pass
         
         # Build statement mappings if compiled mode is selected
         active_mappings = line_mappings
@@ -3766,6 +3826,8 @@ def main():
                 if not stripped: # empty line
                     continue
                 if stripped.startswith(';'): # comment line
+                    continue
+                if s_lower.startswith('#include-once'):
                     continue
                 active_mappings.append(line_mappings[i])
                 
@@ -3807,7 +3869,36 @@ def main():
     if is_legacy_mode:
         syntax_diagnostics = collect_legacy_syntax_errors(args.main_file, merged_lines, line_mappings)
         if syntax_diagnostics:
-            print_legacy_syntax_errors(args.main_file, syntax_diagnostics)
+            if args.json_out:
+                import json
+                json_diags = []
+                for diag in syntax_diagnostics:
+                    if len(diag) == 6:
+                        level, file_p, line_no, col_no, desc, _ = diag
+                    else:
+                        level, line_no, col_no, desc, _ = diag
+                        file_p = args.main_file
+                    if str(level).lower() == 'ref':
+                        continue
+                    sev = "error" if str(level).lower() == "error" else "warning"
+                    json_diags.append({
+                        "file": os.path.abspath(file_p).replace('\\', '/'),
+                        "line": line_no,
+                        "column": col_no,
+                        "severity": sev,
+                        "type": "Syntax Error",
+                        "func": "<global>",
+                        "var": "",
+                        "desc": desc,
+                    })
+                err_cnt = sum(1 for d in json_diags if d["severity"] == "error")
+                warn_cnt = sum(1 for d in json_diags if d["severity"] == "warning")
+                original_print(json.dumps({
+                    "summary": {"total": len(json_diags), "errors": err_cnt, "warnings": warn_cnt},
+                    "diagnostics": json_diags,
+                }))
+            else:
+                print_legacy_syntax_errors(args.main_file, syntax_diagnostics)
             sys.exit(2)
 
     # Write preprocessed source
@@ -4318,4 +4409,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

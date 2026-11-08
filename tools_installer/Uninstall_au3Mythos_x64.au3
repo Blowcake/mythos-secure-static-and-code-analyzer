@@ -165,7 +165,7 @@ While 1
         Case $idCancelBtn
             If $idCancelBtn == $nMsg Then Exit 0
         Case $idAboutBtn
-            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Uninstaller", "au3Mythos Static Analyzer Uninstaller" & @CRLF & "Version 1.2.0" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
+            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Uninstaller", "au3Mythos Static Analyzer Uninstaller" & @CRLF & "Version 1.2.1" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
         Case $idUninstallBtn
             ; If we are on Page 2 and uninstall finished, this button functions as "Finish" / "Beenden" or "Close"
             If $iCurrentPage == 2 Then
@@ -236,19 +236,24 @@ Func RunUninstallSequence()
     GUICtrlSetColor($idStep2, 0x1A73E8)
     Sleep(400)
     
-    Local $sAutoItDir = @ProgramFilesDir & "\AutoIt3"
-    If FileExists($sAutoItDir & "\Au3Check_Original.exe") Then
-        FileDelete($sAutoItDir & "\Au3Check.exe")
-        If Not FileMove($sAutoItDir & "\Au3Check_Original.exe", $sAutoItDir & "\Au3Check.exe", $FC_OVERWRITE) Then
-            GUICtrlSetData($idStep2, "[FAIL] 2. Restoring original compiler files")
-            GUICtrlSetColor($idStep2, 0xC62828)
-            Return ShowResult(False, "Failed to restore original Au3Check.exe in " & $sAutoItDir)
-        EndIf
-        
-        If FileExists($sAutoItDir & "\Au3Check_Original.dat") Then
-            FileDelete($sAutoItDir & "\Au3Check.dat")
-            FileMove($sAutoItDir & "\Au3Check_Original.dat", $sAutoItDir & "\Au3Check.dat", $FC_OVERWRITE)
-        EndIf
+    Local $bIsTempInstall = (StringInStr($sDest, "Temp") > 0 Or StringInStr($sDest, ".tmp") > 0)
+    If Not $bIsTempInstall Then
+        Local $aAutoItDirs = [EnvGet("ProgramFiles(x86)") & "\AutoIt3", @ProgramFilesDir & "\AutoIt3"]
+        For $sAutoItDir In $aAutoItDirs
+            If $sAutoItDir <> "\AutoIt3" And FileExists($sAutoItDir & "\Au3Check_Original.exe") Then
+                FileDelete($sAutoItDir & "\Au3Check.exe")
+                If Not FileMove($sAutoItDir & "\Au3Check_Original.exe", $sAutoItDir & "\Au3Check.exe", $FC_OVERWRITE) Then
+                    GUICtrlSetData($idStep2, "[FAIL] 2. Restoring original compiler files")
+                    GUICtrlSetColor($idStep2, 0xC62828)
+                    Return ShowResult(False, "Failed to restore original Au3Check.exe in " & $sAutoItDir)
+                EndIf
+
+                If FileExists($sAutoItDir & "\Au3Check_Original.dat") Then
+                    FileDelete($sAutoItDir & "\Au3Check.dat")
+                    FileMove($sAutoItDir & "\Au3Check_Original.dat", $sAutoItDir & "\Au3Check.dat", $FC_OVERWRITE)
+                EndIf
+            EndIf
+        Next
     EndIf
     
     GUICtrlSetData($idStep2, "[OK] 2. Restoring original compiler files")
@@ -262,6 +267,7 @@ Func RunUninstallSequence()
     FileDelete($sDest & "\bin\autoit_windows_x64_scoping_analyzer.exe")
     FileDelete($sDest & "\bin\Au3Check_Wrapper_x64.exe")
     FileDelete($sDest & "\au3Mythos_Settings_x64.exe")
+    FileDelete($sDest & "\Uninstall.exe")
     FileDelete($sDest & "\mythos_config\config.json")
     FileDelete($sDest & "\docs\screenshots\*.png")
     DirRemove($sDest & "\docs\screenshots", 1)
@@ -273,6 +279,7 @@ Func RunUninstallSequence()
     DirRemove($sDest & "\docs", 1)
     DirRemove($sDest & "\bin", 1)
     DirRemove($sDest & "\mythos_config", 1)
+    DirRemove($sDest & "\resources", 1)
     
     GUICtrlSetData($idStep3, "[OK] 3. Deleting program files")
     GUICtrlSetColor($idStep3, 0x2E7D32)
@@ -282,8 +289,10 @@ Func RunUninstallSequence()
     GUICtrlSetColor($idStep4, 0x1A73E8)
     Sleep(400)
     
-    DirRemove(@ProgramsCommonDir & "\au3Mythos", 1)
-    DirRemove(@ProgramsDir & "\au3Mythos", 1)
+    If Not $bIsTempInstall Then
+        DirRemove(@ProgramsCommonDir & "\au3Mythos", 1)
+        DirRemove(@ProgramsDir & "\au3Mythos", 1)
+    EndIf
     
     GUICtrlSetData($idStep4, "[OK] 4. Removing Start Menu shortcuts")
     GUICtrlSetColor($idStep4, 0x2E7D32)
@@ -293,7 +302,9 @@ Func RunUninstallSequence()
     GUICtrlSetColor($idStep5, 0x1A73E8)
     Sleep(400)
     
-    RegDelete("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos")
+    If Not $bIsTempInstall Then
+        RegDelete("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos")
+    EndIf
     
     GUICtrlSetData($idStep5, "[OK] 5. Removing registry entries")
     GUICtrlSetColor($idStep5, 0x2E7D32)
@@ -340,37 +351,44 @@ Func CleanupTempFiles()
 EndFunc
 
 Func PerformUninstall(Const $sDest)
+    Local $bIsTempInstall = (StringInStr($sDest, "Temp") > 0 Or StringInStr($sDest, ".tmp") > 0)
+
     ; 1. Rollback intercepting compiler wrapper if active
-    Local $sAutoItDir = @ProgramFilesDir & "\AutoIt3"
-    If FileExists($sAutoItDir & "\Au3Check_Original.exe") Then
-        ProcessClose("Au3Check.exe")
-        ProcessClose("Au3Check_Wrapper.exe")
-        ProcessClose("Au3Check_Wrapper_x64.exe")
-        
-        FileDelete($sAutoItDir & "\Au3Check.exe")
-        FileMove($sAutoItDir & "\Au3Check_Original.exe", $sAutoItDir & "\Au3Check.exe", $FC_OVERWRITE)
-        
-        If FileExists($sAutoItDir & "\Au3Check_Original.dat") Then
-            FileDelete($sAutoItDir & "\Au3Check.dat")
-            FileMove($sAutoItDir & "\Au3Check_Original.dat", $sAutoItDir & "\Au3Check.dat", $FC_OVERWRITE)
-        EndIf
+    If Not $bIsTempInstall Then
+        Local $aAutoItDirs = [EnvGet("ProgramFiles(x86)") & "\AutoIt3", @ProgramFilesDir & "\AutoIt3"]
+        For $sAutoItDir In $aAutoItDirs
+            If $sAutoItDir <> "\AutoIt3" And FileExists($sAutoItDir & "\Au3Check_Original.exe") Then
+                ProcessClose("Au3Check.exe")
+                ProcessClose("Au3Check_Wrapper.exe")
+                ProcessClose("Au3Check_Wrapper_x64.exe")
+
+                FileDelete($sAutoItDir & "\Au3Check.exe")
+                FileMove($sAutoItDir & "\Au3Check_Original.exe", $sAutoItDir & "\Au3Check.exe", $FC_OVERWRITE)
+
+                If FileExists($sAutoItDir & "\Au3Check_Original.dat") Then
+                    FileDelete($sAutoItDir & "\Au3Check.dat")
+                    FileMove($sAutoItDir & "\Au3Check_Original.dat", $sAutoItDir & "\Au3Check.dat", $FC_OVERWRITE)
+                EndIf
+            EndIf
+        Next
     EndIf
     
     ; 2. Terminate Settings GUI
     ProcessClose("au3Mythos_Settings_x64.exe")
     ProcessClose("au3Mythos_Settings.exe")
     
-    ; 3. Delete Start Menu Shortcuts
-    DirRemove(@ProgramsCommonDir & "\au3Mythos", 1)
-    DirRemove(@ProgramsDir & "\au3Mythos", 1)
+    ; 3. Delete Start Menu Shortcuts & Registry entries
+    If Not $bIsTempInstall Then
+        DirRemove(@ProgramsCommonDir & "\au3Mythos", 1)
+        DirRemove(@ProgramsDir & "\au3Mythos", 1)
+        RegDelete("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos")
+    EndIf
     
-    ; 4. Delete Registry entries
-    RegDelete("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos")
-    
-    ; 5. Delete program folder content
+    ; 4. Delete program folder content
     FileDelete($sDest & "\bin\autoit_windows_x64_scoping_analyzer.exe")
     FileDelete($sDest & "\bin\Au3Check_Wrapper_x64.exe")
     FileDelete($sDest & "\au3Mythos_Settings_x64.exe")
+    FileDelete($sDest & "\Uninstall.exe")
     FileDelete($sDest & "\mythos_config\config.json")
     
     FileDelete($sDest & "\docs\screenshots\*.png")
@@ -383,6 +401,7 @@ Func PerformUninstall(Const $sDest)
     DirRemove($sDest & "\docs", 1)
     DirRemove($sDest & "\bin", 1)
     DirRemove($sDest & "\mythos_config", 1)
+    DirRemove($sDest & "\resources", 1)
     
     ; Schedule self deletion on exit
     Local $sCmdFile = @TempDir & "\mythos_uninst_" & Random(1000, 9999, 1) & ".cmd"
@@ -402,4 +421,3 @@ Func PerformUninstall(Const $sDest)
     
     Return 0
 EndFunc
-

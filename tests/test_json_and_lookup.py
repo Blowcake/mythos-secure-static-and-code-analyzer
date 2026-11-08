@@ -175,16 +175,13 @@ Local $x = 20
         
         # 1. Compile custom crash script
         aut2exe_path = r"C:\Program Files (x86)\AutoIt3\Aut2Exe\Aut2exe_x64.exe"
-        from pathlib import Path
-        project_root = Path(__file__).resolve().parents[1]
-        workspace_parent = project_root.parent
-        watchdog_exe = str(workspace_parent / "MCP_Servers" / "MCP_au3mcp" / "bin" / "Tools" / "Watchdog" / "Watchdog_Service_x64.exe")
-        errors_log_path = str(workspace_parent / "MCP_Servers" / "MCP_au3mcp" / "bin" / "logs" / "runtime_errors.jsonl")
+        watchdog_exe = os.environ.get("MYTHOS_WATCHDOG_EXE", "")
+        errors_log_path = os.environ.get("MYTHOS_WATCHDOG_LOG", "")
         
         if os.environ.get("MYTHOS_RUN_WATCHDOG_TEST") != "1":
             self.skipTest("Skipping watchdog compiled runtime lookup test by default. Set MYTHOS_RUN_WATCHDOG_TEST=1 to enable.")
             
-        if not os.path.exists(aut2exe_path) or not os.path.exists(watchdog_exe):
+        if not os.path.exists(aut2exe_path) or not watchdog_exe or not os.path.exists(watchdog_exe):
             self.skipTest("Aut2Exe or Watchdog service executable not found.")
             
         custom_inc_code = """; custom_include.au3

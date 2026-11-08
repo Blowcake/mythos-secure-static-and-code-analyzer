@@ -82,7 +82,10 @@ class TestInstallerE2E(unittest.TestCase):
         self.assertTrue((self.test_install_dir / "bin" / "autoit_windows_x64_scoping_analyzer.exe").exists())
         self.assertTrue((self.test_install_dir / "bin" / "Au3Check_Wrapper_x64.exe").exists())
         self.assertTrue((self.test_install_dir / "docs" / "au3Mythos_User_Manual.md").exists())
+        self.assertTrue((self.test_install_dir / "docs" / "au3Mythos_Technical_Reference.md").exists())
+        self.assertTrue((self.test_install_dir / "docs" / "au3Mythos_JSON_API.md").exists())
         self.assertTrue((self.test_install_dir / "mythos_config" / "config.json").exists())
+        self.assertTrue((self.test_install_dir / "resources" / "mythos_logo_600x327.jpg").exists())
 
         # 3. Run silent uninstaller
         print("Running silent Uninstaller...")

@@ -171,7 +171,7 @@ While 1
         Case $idCancelBtn
             If $idCancelBtn == $nMsg Then Exit 0
         Case $idAboutBtn
-            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Setup", "au3Mythos Static Analyzer Setup" & @CRLF & "Version 1.2.0" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
+            MsgBox($MB_ICONINFORMATION + $MB_OK, "About au3Mythos Setup", "au3Mythos Static Analyzer Setup" & @CRLF & "Version 1.2.1" & @CRLF & @CRLF & "Developed by Harald Frank" & @CRLF & "Copyright (C) 2026. All rights reserved.", 0, $hMainGui)
         Case $idBrowseBtn
             $sSelDir = FileSelectFolder("Select Installation Directory", "", 1, GUICtrlRead($idDirInput), $hMainGui)
             If Not @error And $sSelDir <> "" Then
@@ -242,7 +242,7 @@ Func RunInstallSequence()
     GUICtrlSetColor($idStep1, 0x1A73E8) ; Blue (In Progress)
     Sleep(400)
     
-    If Not DirCreate($sDest) Or Not DirCreate($sDest & "\bin") Or Not DirCreate($sDest & "\docs") Or Not DirCreate($sDest & "\docs\screenshots") Or Not DirCreate($sDest & "\mythos_config") Then
+    If Not DirCreate($sDest) Or Not DirCreate($sDest & "\bin") Or Not DirCreate($sDest & "\docs") Or Not DirCreate($sDest & "\docs\screenshots") Or Not DirCreate($sDest & "\mythos_config") Or Not DirCreate($sDest & "\resources") Then
         GUICtrlSetData($idStep1, "[FAIL] 1. Creating installation directories")
         GUICtrlSetColor($idStep1, 0xC62828) ; Red
         Return ShowResult(False, "Failed to create installation directories at target path. Please check write permissions.")
@@ -278,13 +278,26 @@ Func RunInstallSequence()
     EndIf
     
     If FileExists($sSourceBin & "\Au3Check_Wrapper_x64.exe") Then
-        if Not FileCopy($sSourceBin & "\Au3Check_Wrapper_x64.exe", $sDest & "\bin\Au3Check_Wrapper_x64.exe", $FC_OVERWRITE) Then
+        If Not FileCopy($sSourceBin & "\Au3Check_Wrapper_x64.exe", $sDest & "\bin\Au3Check_Wrapper_x64.exe", $FC_OVERWRITE) Then
             GUICtrlSetData($idStep2, "[FAIL] 2. Copying scoping analyzer and wrapper")
             GUICtrlSetColor($idStep2, 0xC62828)
             Return ShowResult(False, "Failed to copy Au3Check_Wrapper_x64.exe binary.")
         EndIf
     EndIf
     
+    Local $bIsTempInstall = (StringInStr($sDest, "Temp") > 0 Or StringInStr($sDest, ".tmp") > 0)
+    If Not $bIsTempInstall And FileGetSize($sDest & "\bin\Au3Check_Wrapper_x64.exe") > 50000 Then
+        Local $aAutoItDirs = [EnvGet("ProgramFiles(x86)") & "\AutoIt3", @ProgramFilesDir & "\AutoIt3"]
+        For $sAutoItDir In $aAutoItDirs
+            If $sAutoItDir <> "\AutoIt3" And FileExists($sAutoItDir & "\Au3Check_Original.exe") Then
+                ProcessClose("Au3Check.exe")
+                ProcessClose("Au3Check_Wrapper.exe")
+                ProcessClose("Au3Check_Wrapper_x64.exe")
+                FileCopy($sDest & "\bin\Au3Check_Wrapper_x64.exe", $sAutoItDir & "\Au3Check.exe", $FC_OVERWRITE)
+            EndIf
+        Next
+    EndIf
+
     GUICtrlSetData($idStep2, "[OK] 2. Copying scoping analyzer and wrapper")
     GUICtrlSetColor($idStep2, 0x2E7D32)
     
@@ -321,11 +334,20 @@ Func RunInstallSequence()
         GUICtrlSetColor($idStep3, 0xC62828)
         Return ShowResult(False, "Failed to copy Uninstall_au3Mythos_x64.exe uninstaller payload.")
     EndIf
+    If FileExists($sDest & "\Uninstall.exe") Then
+        FileDelete($sDest & "\Uninstall.exe")
+    EndIf
     
-    ; Copy Default Config template
+    ; Copy Default Config template and visual resources
     If FileExists($sSourceConfig & "\config.json") Then
         FileCopy($sSourceConfig & "\config.json", $sDest & "\mythos_config\config.json", $FC_OVERWRITE)
     EndIf
+    Local $aResFiles = ["mythos_logo.ico", "mythos_logo.png", "mythos_logo_600x327.jpg"]
+    For $sRes In $aResFiles
+        If FileExists($sSourceRoot & "\resources\" & $sRes) Then
+            FileCopy($sSourceRoot & "\resources\" & $sRes, $sDest & "\resources\" & $sRes, $FC_OVERWRITE)
+        EndIf
+    Next
     
     ; Copy Documentation Files
     Local $aDocs = ["au3Mythos_User_Manual.md", "au3Mythos_Technical_Reference.md", "au3Mythos_JSON_API.md"]
@@ -354,16 +376,18 @@ Func RunInstallSequence()
     GUICtrlSetColor($idStep4, 0x1A73E8)
     Sleep(400)
     
-    Local $sShortcutsFolder = @ProgramsCommonDir & "\au3Mythos"
-    If Not IsAdmin() Or Not DirCreate($sShortcutsFolder) Then
-        $sShortcutsFolder = @ProgramsDir & "\au3Mythos"
-        DirCreate($sShortcutsFolder)
+    If Not $bIsTempInstall Then
+        Local $sShortcutsFolder = @ProgramsCommonDir & "\au3Mythos"
+        If Not IsAdmin() Or Not DirCreate($sShortcutsFolder) Then
+            $sShortcutsFolder = @ProgramsDir & "\au3Mythos"
+            DirCreate($sShortcutsFolder)
+        EndIf
+
+        FileCreateShortcut($sDest & "\au3Mythos_Settings_x64.exe", $sShortcutsFolder & "\au3Mythos Settings Manager.lnk", $sDest)
+        FileCreateShortcut($sDest & "\docs\au3Mythos_User_Manual.md", $sShortcutsFolder & "\au3Mythos User Manual.lnk", $sDest & "\docs")
+        FileCreateShortcut($sDest & "\Uninstall_au3Mythos_x64.exe", $sShortcutsFolder & "\Uninstall au3Mythos.lnk", $sDest)
     EndIf
-    
-    FileCreateShortcut($sDest & "\au3Mythos_Settings_x64.exe", $sShortcutsFolder & "\au3Mythos Settings Manager.lnk", $sDest)
-    FileCreateShortcut($sDest & "\docs\au3Mythos_User_Manual.md", $sShortcutsFolder & "\au3Mythos User Manual.lnk", $sDest & "\docs")
-    FileCreateShortcut($sDest & "\Uninstall_au3Mythos_x64.exe", $sShortcutsFolder & "\Uninstall au3Mythos.lnk", $sDest)
-    
+
     GUICtrlSetData($idStep4, "[OK] 4. Creating Start Menu shortcuts")
     GUICtrlSetColor($idStep4, 0x2E7D32)
     
@@ -372,10 +396,10 @@ Func RunInstallSequence()
     GUICtrlSetColor($idStep5, 0x1A73E8)
     Sleep(400)
     
-    If IsAdmin() And StringInStr($sDest, "Temp") == 0 Then
+    If IsAdmin() And Not $bIsTempInstall Then
         Local $sUnReg = "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos"
         RegWrite($sUnReg, "DisplayName", "REG_SZ", "au3Mythos Static Checker & Scoping Analyzer")
-        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.2.0")
+        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.2.1")
         RegWrite($sUnReg, "Publisher", "REG_SZ", "Harald Frank")
         RegWrite($sUnReg, "UninstallString", "REG_SZ", '"' & $sDest & '\Uninstall_au3Mythos_x64.exe"')
         RegWrite($sUnReg, "DisplayIcon", "REG_SZ", '"' & $sDest & '\au3Mythos_Settings_x64.exe",0')
@@ -420,6 +444,7 @@ Func InstallFiles(Const $sDest)
     If Not DirCreate($sDest & "\docs") Then Return 1
     If Not DirCreate($sDest & "\docs\screenshots") Then Return 1
     If Not DirCreate($sDest & "\mythos_config") Then Return 1
+    If Not DirCreate($sDest & "\resources") Then Return 1
     
     ; Resolve source directory root dynamically
     Local $sSourceRoot = @ScriptDir
@@ -450,6 +475,19 @@ Func InstallFiles(Const $sDest)
         If Not FileCopy($sSourceBin & "\Au3Check_Wrapper_x64.exe", $sDest & "\bin\Au3Check_Wrapper_x64.exe", $FC_OVERWRITE) Then Return 4
     EndIf
     
+    Local $bIsTempInstall = (StringInStr($sDest, "Temp") > 0 Or StringInStr($sDest, ".tmp") > 0)
+    If Not $bIsTempInstall And FileGetSize($sDest & "\bin\Au3Check_Wrapper_x64.exe") > 50000 Then
+        Local $aAutoItDirs = [EnvGet("ProgramFiles(x86)") & "\AutoIt3", @ProgramFilesDir & "\AutoIt3"]
+        For $sAutoItDir In $aAutoItDirs
+            If $sAutoItDir <> "\AutoIt3" And FileExists($sAutoItDir & "\Au3Check_Original.exe") Then
+                ProcessClose("Au3Check.exe")
+                ProcessClose("Au3Check_Wrapper.exe")
+                ProcessClose("Au3Check_Wrapper_x64.exe")
+                FileCopy($sDest & "\bin\Au3Check_Wrapper_x64.exe", $sAutoItDir & "\Au3Check.exe", $FC_OVERWRITE)
+            EndIf
+        Next
+    EndIf
+
     ; Copy Uninstaller payload
     If FileExists($sSourceInstaller & "\Uninstall_au3Mythos_x64.exe") Then
         If Not FileCopy($sSourceInstaller & "\Uninstall_au3Mythos_x64.exe", $sDest & "\Uninstall_au3Mythos_x64.exe", $FC_OVERWRITE) Then Return 5
@@ -458,11 +496,20 @@ Func InstallFiles(Const $sDest)
     ElseIf FileExists($sSourceBin & "\Uninstall_au3Mythos_x64.exe") Then
         If Not FileCopy($sSourceBin & "\Uninstall_au3Mythos_x64.exe", $sDest & "\Uninstall_au3Mythos_x64.exe", $FC_OVERWRITE) Then Return 5
     EndIf
+    If FileExists($sDest & "\Uninstall.exe") Then
+        FileDelete($sDest & "\Uninstall.exe")
+    EndIf
     
-    ; Copy Default Config template
+    ; Copy Default Config template and visual resources
     If FileExists($sSourceConfig & "\config.json") Then
         If Not FileCopy($sSourceConfig & "\config.json", $sDest & "\mythos_config\config.json", $FC_OVERWRITE) Then Return 6
     EndIf
+    Local $aResFiles = ["mythos_logo.ico", "mythos_logo.png", "mythos_logo_600x327.jpg"]
+    For $sRes In $aResFiles
+        If FileExists($sSourceRoot & "\resources\" & $sRes) Then
+            FileCopy($sSourceRoot & "\resources\" & $sRes, $sDest & "\resources\" & $sRes, $FC_OVERWRITE)
+        EndIf
+    Next
     
     ; Copy Documentation Files
     Local $aDocs = ["au3Mythos_User_Manual.md", "au3Mythos_Technical_Reference.md", "au3Mythos_JSON_API.md"]
@@ -484,21 +531,23 @@ Func InstallFiles(Const $sDest)
     EndIf
     
     ; Create Start Menu shortcuts
-    Local $sShortcutsFolder = @ProgramsCommonDir & "\au3Mythos"
-    If Not IsAdmin() Or Not DirCreate($sShortcutsFolder) Then
-        $sShortcutsFolder = @ProgramsDir & "\au3Mythos"
-        DirCreate($sShortcutsFolder)
+    If Not $bIsTempInstall Then
+        Local $sShortcutsFolder = @ProgramsCommonDir & "\au3Mythos"
+        If Not IsAdmin() Or Not DirCreate($sShortcutsFolder) Then
+            $sShortcutsFolder = @ProgramsDir & "\au3Mythos"
+            DirCreate($sShortcutsFolder)
+        EndIf
+
+        FileCreateShortcut($sDest & "\au3Mythos_Settings_x64.exe", $sShortcutsFolder & "\au3Mythos Settings Manager.lnk", $sDest)
+        FileCreateShortcut($sDest & "\docs\au3Mythos_User_Manual.md", $sShortcutsFolder & "\au3Mythos User Manual.lnk", $sDest & "\docs")
+        FileCreateShortcut($sDest & "\Uninstall_au3Mythos_x64.exe", $sShortcutsFolder & "\Uninstall au3Mythos.lnk", $sDest)
     EndIf
-    
-    FileCreateShortcut($sDest & "\au3Mythos_Settings_x64.exe", $sShortcutsFolder & "\au3Mythos Settings Manager.lnk", $sDest)
-    FileCreateShortcut($sDest & "\docs\au3Mythos_User_Manual.md", $sShortcutsFolder & "\au3Mythos User Manual.lnk", $sDest & "\docs")
-    FileCreateShortcut($sDest & "\Uninstall_au3Mythos_x64.exe", $sShortcutsFolder & "\Uninstall au3Mythos.lnk", $sDest)
-    
+
     ; Write Uninstall Registry entries
-    If IsAdmin() And StringInStr($sDest, "Temp") == 0 Then
+    If IsAdmin() And Not $bIsTempInstall Then
         Local $sUnReg = "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\au3Mythos"
         RegWrite($sUnReg, "DisplayName", "REG_SZ", "au3Mythos Static Checker & Scoping Analyzer")
-        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.2.0")
+        RegWrite($sUnReg, "DisplayVersion", "REG_SZ", "1.2.1")
         RegWrite($sUnReg, "Publisher", "REG_SZ", "Harald Frank")
         RegWrite($sUnReg, "UninstallString", "REG_SZ", '"' & $sDest & '\Uninstall_au3Mythos_x64.exe"')
         RegWrite($sUnReg, "DisplayIcon", "REG_SZ", '"' & $sDest & '\au3Mythos_Settings_x64.exe",0')
@@ -510,4 +559,3 @@ Func InstallFiles(Const $sDest)
     
     Return 0
 EndFunc
-

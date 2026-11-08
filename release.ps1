@@ -146,10 +146,7 @@ Copy-FileTo (Join-Path $projectRoot "bin\au3Mythos_Settings_x64.exe") (Join-Path
 Copy-FileTo (Join-Path $projectRoot "bin\Setup_au3Mythos_x64.exe") (Join-Path $winStage "Setup_au3Mythos_x64.exe")
 Copy-FileTo (Join-Path $projectRoot "bin\Uninstall_au3Mythos_x64.exe") (Join-Path $winStage "tools_installer\Uninstall_au3Mythos_x64.exe")
 
-# Copy default config template
-Copy-FileTo (Join-Path $projectRoot "resources\mythos_config\config.json") (Join-Path $winStage "mythos_config\config.json")
-
-# Copy resources
+# Copy resources (including resources\mythos_config\config.json)
 if (Test-Path (Join-Path $projectRoot "resources")) {
     Copy-Item -Path (Join-Path $projectRoot "resources") -Destination $winStage -Recurse -Force
 }
@@ -160,12 +157,18 @@ foreach ($doc in $publicDocs) {
     Copy-FileTo (Join-Path $projectRoot $doc) (Join-Path $winStage $doc)
 }
 
-# Copy user manual and screenshots
+# Copy user manuals, technical reference, JSON API docs, and screenshots
 $stageDocsDir = Join-Path $winStage "docs"
 if (-not (Test-Path $stageDocsDir)) {
     New-Item -ItemType Directory -Path $stageDocsDir -Force | Out-Null
 }
-Copy-Item -Path (Join-Path $projectRoot "docs\au3Mythos_User_Manual.md") -Destination (Join-Path $stageDocsDir "au3Mythos_User_Manual.md") -Force
+$docFiles = @("au3Mythos_User_Manual.md", "au3Mythos_Technical_Reference.md", "au3Mythos_JSON_API.md")
+foreach ($docFile in $docFiles) {
+    $srcDoc = Join-Path $projectRoot "docs\$docFile"
+    if (Test-Path -LiteralPath $srcDoc -PathType Leaf) {
+        Copy-Item -LiteralPath $srcDoc -Destination (Join-Path $stageDocsDir $docFile) -Force
+    }
+}
 Copy-Item -Path (Join-Path $projectRoot "docs\screenshots") -Destination $stageDocsDir -Recurse -Force
 
 # Forbidden file verification to prevent leak of private assets

@@ -31,6 +31,8 @@ Else
         Global $sTemplatePath = ""
         If FileExists(@ScriptDir & "\mythos_config\config.json") Then
             $sTemplatePath = @ScriptDir & "\mythos_config\config.json"
+        ElseIf FileExists(@ScriptDir & "\resources\mythos_config\config.json") Then
+            $sTemplatePath = @ScriptDir & "\resources\mythos_config\config.json"
         ElseIf FileExists(@ScriptDir & "\..\resources\mythos_config\config.json") Then
             $sTemplatePath = @ScriptDir & "\..\resources\mythos_config\config.json"
         EndIf
@@ -280,16 +282,16 @@ Func LoadConfig()
     EndIf
 
     If IsMap($mConfig) And __JSON_MapExists($mConfig, "configs") Then
-        $mConfigsMapLoad = $mConfig["configs"]
-        If IsMap($mConfigsMapLoad) And __JSON_MapExists($mConfigsMapLoad, "default_mythos") Then
-            $mDefMythos = $mConfigsMapLoad["default_mythos"]
-            If IsMap($mDefMythos) And __JSON_MapExists($mDefMythos, "analyzer_path") And $mDefMythos["analyzer_path"] == "" Then
+        Local $mConfigsSync = $mConfig["configs"]
+        If IsMap($mConfigsSync) And __JSON_MapExists($mConfigsSync, "default_mythos") Then
+            Local $mDefMythosSync = $mConfigsSync["default_mythos"]
+            If IsMap($mDefMythosSync) And __JSON_MapExists($mDefMythosSync, "analyzer_path") And $mDefMythosSync["analyzer_path"] == "" Then
                 If __JSON_MapExists($mConfig, "mythos_settings") Then
-                    $mOldMythos = $mConfig["mythos_settings"]
-                    If IsMap($mOldMythos) And __JSON_MapExists($mOldMythos, "analyzer_path") And $mOldMythos["analyzer_path"] <> "" Then
-                        $mDefMythos["analyzer_path"] = $mOldMythos["analyzer_path"]
-                        $mConfigsMapLoad["default_mythos"] = $mDefMythos
-                        $mConfig["configs"] = $mConfigsMapLoad
+                    Local $mOldMythosSync = $mConfig["mythos_settings"]
+                    If IsMap($mOldMythosSync) And __JSON_MapExists($mOldMythosSync, "analyzer_path") And $mOldMythosSync["analyzer_path"] <> "" Then
+                        $mDefMythosSync["analyzer_path"] = $mOldMythosSync["analyzer_path"]
+                        $mConfigsSync["default_mythos"] = $mDefMythosSync
+                        $mConfig["configs"] = $mConfigsSync
                     EndIf
                 EndIf
             EndIf
@@ -1335,7 +1337,7 @@ Func ShowAboutDialog()
     GUICtrlSetFont(-1, 16, 800, 0, "Segoe UI")
     GUICtrlSetColor(-1, 0x1A73E8)
     
-    GUICtrlCreateLabel("Version 1.2.0", 20, 50, 380, 20)
+    GUICtrlCreateLabel("Version 1.2.1", 20, 50, 380, 20)
     GUICtrlSetFont(-1, 10, 400, 0, "Segoe UI")
     GUICtrlSetColor(-1, 0x666666)
     
@@ -1445,4 +1447,3 @@ Func ShowSplashScreen()
     Sleep(1500)
     GUIDelete($hSplash)
 EndFunc
-

@@ -84,8 +84,9 @@ Func _GetProcessFullPath($iPid)
     If @error Or $hProcess[0] = 0 Then Return ""
     Local $tPath = DllStructCreate("wchar[1024]")
     Local $aSize = DllCall("kernel32.dll", "bool", "QueryFullProcessImageNameW", "handle", $hProcess[0], "dword", 0, "struct*", $tPath, "dword*", 1024)
+    Local $iQueryErr = @error
     DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hProcess[0])
-    If Not @error And $aSize[0] Then Return DllStructGetData($tPath, 1)
+    If Not $iQueryErr And IsArray($aSize) And $aSize[0] Then Return DllStructGetData($tPath, 1)
     Return ""
 EndFunc
 
@@ -166,6 +167,7 @@ EndFunc
 ; ===============================================================================================================================
 Func Main()
     Local $bJsonOut = False
+    Local $bCompiled = False
     Local $iLookupLine = -1
     Local $sFilteredRaw = ""
     Local $sTotalOutput = ""
@@ -176,19 +178,24 @@ Func Main()
         If StringLower($CmdLine[$i]) == "-mythos" Then
             ConsoleWrite("au3Check Wrapper (au3Mythos) - Active" & @CRLF)
             Exit 0
-        ElseIf StringLower($CmdLine[$i]) == "-json_out" Then
+        ElseIf StringLower($CmdLine[$i]) == "-json_out" Or StringLower($CmdLine[$i]) == "--json-out" Then
             $bJsonOut = True
-        ElseIf StringLower($CmdLine[$i]) == "-lookup_runtime_line" And $i < $CmdLine[0] Then
+        ElseIf StringLower($CmdLine[$i]) == "-compiled" Or StringLower($CmdLine[$i]) == "--compiled" Then
+            $bCompiled = True
+        ElseIf (StringLower($CmdLine[$i]) == "-lookup_runtime_line" Or StringLower($CmdLine[$i]) == "--lookup-runtime-line") And $i < $CmdLine[0] Then
             $iLookupLine = Int($CmdLine[$i + 1])
         EndIf
     Next
 
     For $i = 1 To $CmdLine[0]
         $sArg = $CmdLine[$i]
-        If StringLower($sArg) == "-json_out" Then
+        If StringLower($sArg) == "-json_out" Or StringLower($sArg) == "--json-out" Then
             ContinueLoop
         EndIf
-        If StringLower($sArg) == "-lookup_runtime_line" Then
+        If StringLower($sArg) == "-compiled" Or StringLower($sArg) == "--compiled" Then
+            ContinueLoop
+        EndIf
+        If StringLower($sArg) == "-lookup_runtime_line" Or StringLower($sArg) == "--lookup-runtime-line" Then
             $i += 1
             ContinueLoop
         EndIf
@@ -291,6 +298,7 @@ Func Main()
             If __JSON_MapExists($mConfig, "wrapper_enabled") Then $bEnabled = $mConfig["wrapper_enabled"]
             
             If $bEnabled Then
+                $sAction = "mythos"
                 $aRules = ""
                 If __JSON_MapExists($mConfig, "rules") Then $aRules = $mConfig["rules"]
                 
@@ -432,12 +440,35 @@ Func Main()
         ; Build the command line depending on whether it is an executable or a python script
         $sCmd = ""
         Local $sAnalyzerArgs = ""
+        Local $sGuiWarnArgs = ""
+        If $iLookupLine == -1 Then
+            If IsMap($mSettings) And __JSON_MapExists($mSettings, "warnings") Then
+                $mWarn = $mSettings["warnings"]
+                If IsMap($mWarn) Then
+                    For $i = 1 To 7
+                        $sKey = String($i)
+                        If __JSON_MapExists($mWarn, $sKey) Then
+                            $bVal = $mWarn[$sKey]
+                            If IsBool($bVal) And $bVal Then
+                                $sGuiWarnArgs &= " -w " & $sKey
+                            ElseIf String($bVal) == "true" Then
+                                $sGuiWarnArgs &= " -w " & $sKey
+                            Else
+                                $sGuiWarnArgs &= " -w -" & $sKey
+                            EndIf
+                        EndIf
+                    Next
+                EndIf
+            EndIf
+        EndIf
+
         If $iLookupLine > -1 Then
             $sAnalyzerArgs = '--lookup-runtime-line ' & $iLookupLine
+            If $bCompiled Then $sAnalyzerArgs &= " --compiled"
             If $bJsonOut Then $sAnalyzerArgs &= " --json-out"
             $sAnalyzerArgs &= ' "' & $sTargetFile & '"'
         Else
-            $sAnalyzerArgs = $sFilteredRaw
+            $sAnalyzerArgs = $sGuiWarnArgs & $sFilteredRaw
             If $bJsonOut Then $sAnalyzerArgs &= " --json-out"
         EndIf
 
@@ -452,26 +483,6 @@ Func Main()
             If $bExperimental Then $sCmd &= " --enable-experimental-checks"
             If $bNoAutoInclude Then $sCmd &= " --no-auto-include-discovery"
             If $bSystemDeadStores Then $sCmd &= " --enable-system-dead-stores"
-            
-            ; Append GUI warnings configuration if not overridden on the command line
-            If IsMap($mSettings) And __JSON_MapExists($mSettings, "warnings") Then
-                $mWarn = $mSettings["warnings"]
-                If IsMap($mWarn) Then
-                    For $i = 1 To 7
-                        $sKey = String($i)
-                        If __JSON_MapExists($mWarn, $sKey) Then
-                            $bVal = $mWarn[$sKey]
-                            If IsBool($bVal) And $bVal Then
-                                $sCmd &= " -w " & $sKey
-                            ElseIf String($bVal) == "true" Then
-                                $sCmd &= " -w " & $sKey
-                            Else
-                                $sCmd &= " -w -" & $sKey
-                            EndIf
-                        EndIf
-                    Next
-                EndIf
-            EndIf
         EndIf
         
         $iPid = Run($sCmd, @WorkingDir, @SW_HIDE, $STDIN_CHILD + $STDOUT_CHILD + $STDERR_CHILD)
